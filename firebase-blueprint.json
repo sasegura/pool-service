@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "App user (Admin or Worker)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "worker"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "Pool": {
+      "title": "Pool",
+      "description": "Pool location and details",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "coordinates": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "clientId": { "type": "string" }
+      },
+      "required": ["name", "address"]
+    },
+    "Route": {
+      "title": "Route",
+      "description": "Daily route for a worker",
+      "type": "object",
+      "properties": {
+        "workerId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "poolIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed"] }
+      },
+      "required": ["workerId", "date", "poolIds"]
+    },
+    "Log": {
+      "title": "Log",
+      "description": "Service log for a pool visit",
+      "type": "object",
+      "properties": {
+        "workerId": { "type": "string" },
+        "poolId": { "type": "string" },
+        "arrivalTime": { "type": "string", "format": "date-time" },
+        "departureTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["ok", "issue"] },
+        "notes": { "type": "string" },
+        "photos": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        }
+      },
+      "required": ["workerId", "poolId", "arrivalTime", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/pools/{poolId}": {
+      "schema": "Pool",
+      "description": "Pool registry"
+    },
+    "/routes/{routeId}": {
+      "schema": "Route",
+      "description": "Daily worker routes"
+    },
+    "/logs/{logId}": {
+      "schema": "Log",
+      "description": "Service visit logs"
+    }
+  }
+}

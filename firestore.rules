@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Fields: name (string), email (string), role (string: admin|worker)
+    //
+    // Collection: pools
+    // Fields: name (string), address (string), coordinates (map), clientId (string)
+    //
+    // Collection: routes
+    // Fields: workerId (string), date (string), poolIds (list), status (string)
+    //
+    // Collection: logs
+    // Fields: workerId (string), poolId (string), arrivalTime (timestamp), departureTime (timestamp), status (string), notes (string), photos (list)
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         request.auth.token.email == "sasegura.fernandez87@gmail.com");
+    }
+    
+    function isWorker() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'worker';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Pools collection
+    match /pools/{poolId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Routes collection
+    match /routes/{routeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update: if isAuthenticated() && (isAdmin() || (isWorker() && request.resource.data.workerId == request.auth.uid));
+      allow delete: if isAdmin();
+    }
+
+    // Logs collection
+    match /logs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}

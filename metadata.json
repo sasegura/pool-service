@@ -1,0 +1,5 @@
+{
+  "name": "Miami Pool Care",
+  "description": "Gestión de mantenimiento y limpieza de piscinas en Miami. Registro de visitas, incidencias y rutas para trabajadores.",
+  "requestFramePermissions": ["geolocation"]
+}
