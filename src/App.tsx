@@ -8,6 +8,7 @@ import AdminOverview from './pages/AdminOverview';
 import PoolsPage from './pages/PoolsPage';
 import RoutesPage from './pages/RoutesPage';
 import TeamPage from './pages/TeamPage';
+import IncidentsPage from './pages/IncidentsPage';
 import ClientDashboard from './pages/ClientDashboard';
 import Layout from './components/Layout';
 
@@ -57,6 +58,14 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="admin">
                   <TeamPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="incidents" 
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <IncidentsPage />
                 </ProtectedRoute>
               } 
             />

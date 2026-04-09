@@ -31,6 +31,7 @@ interface Route {
 export default function WorkerDashboard() {
   const { user } = useAuth();
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
+  const [hasOtherRoutes, setHasOtherRoutes] = useState(false);
   const [pools, setPools] = useState<Record<string, Pool>>({});
   const [loading, setLoading] = useState(true);
   const [activePoolIndex, setActivePoolIndex] = useState<number | null>(null);
@@ -53,18 +54,25 @@ export default function WorkerDashboard() {
         const routeData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Route;
         setTodayRoute(routeData);
 
-        // Fetch pool details
+        // Fetch pool details efficiently
         const poolIds = routeData.poolIds;
         const poolMap: Record<string, Pool> = {};
-        for (const id of poolIds) {
-          const pDoc = await getDocs(query(collection(db, 'pools'))); // Simple fetch for now
-          pDoc.forEach(d => {
-            if (poolIds.includes(d.id)) poolMap[d.id] = { id: d.id, ...d.data() } as Pool;
+        
+        if (poolIds.length > 0) {
+          const poolsSnap = await getDocs(collection(db, 'pools'));
+          poolsSnap.forEach(d => {
+            if (poolIds.includes(d.id)) {
+              poolMap[d.id] = { id: d.id, ...d.data() } as Pool;
+            }
           });
         }
         setPools(poolMap);
       } else {
         setTodayRoute(null);
+        // Check if there are routes for other days
+        const allRoutesQ = query(collection(db, 'routes'), where('workerId', '==', user.uid));
+        const allRoutesSnap = await getDocs(allRoutesQ);
+        setHasOtherRoutes(!allRoutesSnap.empty);
       }
       setLoading(false);
     });
@@ -74,8 +82,20 @@ export default function WorkerDashboard() {
 
   const handleStartDay = async () => {
     if (!todayRoute) return;
-    await updateDoc(doc(db, 'routes', todayRoute.id), { status: 'in-progress' });
-    toast.info('Jornada iniciada');
+    await updateDoc(doc(db, 'routes', todayRoute.id), { 
+      status: 'in-progress',
+      startTime: todayRoute.startTime || new Date().toISOString()
+    });
+    toast.info(todayRoute.status === 'completed' ? 'Jornada reanudada' : 'Jornada iniciada');
+  };
+
+  const handleEndDay = async () => {
+    if (!todayRoute) return;
+    await updateDoc(doc(db, 'routes', todayRoute.id), { 
+      status: 'completed',
+      endTime: new Date().toISOString()
+    });
+    toast.success('Jornada finalizada. ¡Buen trabajo!');
   };
 
   const handleArrive = (index: number) => {
@@ -99,6 +119,20 @@ export default function WorkerDashboard() {
         notes: status === 'issue' ? notes : '',
         date: todayRoute.date
       });
+
+      // Update route progress
+      const currentCompleted = todayRoute.completedPools || [];
+      if (!currentCompleted.includes(poolId)) {
+        const newCompleted = [...currentCompleted, poolId];
+        const isAllDone = newCompleted.length === todayRoute.poolIds.length;
+        
+        await updateDoc(doc(db, 'routes', todayRoute.id), {
+          completedPools: newCompleted,
+          status: isAllDone ? 'completed' : 'in-progress',
+          lastPoolId: poolId,
+          lastStatus: status
+        });
+      }
 
       toast.success(status === 'ok' ? 'Servicio finalizado correctamente' : 'Incidencia reportada');
       
@@ -128,7 +162,12 @@ export default function WorkerDashboard() {
           <Clock className="w-12 h-12 text-slate-400" />
         </div>
         <h2 className="text-xl font-bold text-slate-900 mb-2">No tienes ruta asignada hoy</h2>
-        <p className="text-slate-500">Contacta con administración si crees que es un error.</p>
+        {hasOtherRoutes ? (
+          <p className="text-slate-500">Tienes rutas asignadas para otros días, pero ninguna para hoy ({format(new Date(), 'dd/MM/yyyy')}).</p>
+        ) : (
+          <p className="text-slate-500">No se han encontrado rutas asignadas a tu usuario.</p>
+        )}
+        <p className="text-xs text-slate-400 mt-4 italic">ID de Usuario: {user.uid}</p>
       </div>
     );
   }
@@ -149,11 +188,37 @@ export default function WorkerDashboard() {
             <h2 className="text-2xl font-black text-slate-900">Mi Ruta</h2>
             <p className="text-slate-500">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</p>
           </div>
-          {todayRoute.status === 'pending' && (
-            <Button variant="primary" onClick={handleStartDay} className="gap-2">
-              <Play className="w-4 h-4" /> Comenzar Día
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {todayRoute.status === 'pending' && (
+              <Button variant="primary" onClick={handleStartDay} className="gap-2">
+                <Play className="w-4 h-4" /> Comenzar Jornada
+              </Button>
+            )}
+            {todayRoute.status === 'in-progress' && (
+              <Button variant="danger" onClick={handleEndDay} className="gap-2 shadow-lg shadow-red-100">
+                Finalizar Jornada
+              </Button>
+            )}
+            {todayRoute.status === 'completed' && (
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex gap-2">
+                  {(todayRoute.completedPools?.length || 0) < todayRoute.poolIds.length && (
+                    <Button variant="primary" onClick={handleStartDay} size="sm" className="gap-2">
+                      <Play className="w-3 h-3" /> Continuar Jornada
+                    </Button>
+                  )}
+                  <div className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> Finalizada
+                  </div>
+                </div>
+                {todayRoute.startTime && todayRoute.endTime && (
+                  <span className="text-[10px] text-slate-400 mt-1 font-mono">
+                    {format(new Date(todayRoute.startTime), 'HH:mm')} - {format(new Date(todayRoute.endTime), 'HH:mm')}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </header>
 
         {/* Route Map */}
@@ -202,12 +267,13 @@ export default function WorkerDashboard() {
           const pool = pools[poolId];
           if (!pool) return null;
           const isActive = activePoolIndex === index;
-          const isCompleted = false; // Simplified
+          const isCompleted = todayRoute.completedPools?.includes(poolId);
 
           return (
             <Card key={poolId} className={cn(
               "transition-all duration-300",
-              isActive ? "ring-2 ring-blue-500 border-transparent" : ""
+              isActive ? "ring-2 ring-blue-500 border-transparent" : "",
+              isCompleted ? "opacity-75 bg-slate-50" : ""
             )}>
               <div className="p-5">
                 <div className="flex justify-between items-start mb-4">
@@ -238,14 +304,21 @@ export default function WorkerDashboard() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
                     >
-                      <Button 
-                        variant="primary" 
-                        className="w-full h-12 text-lg font-bold"
-                        onClick={() => handleArrive(index)}
-                        disabled={todayRoute.status === 'pending'}
-                      >
-                        Llegué
-                      </Button>
+                      {isCompleted ? (
+                        <div className="w-full h-12 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center gap-2 text-emerald-600 font-bold">
+                          <CheckCircle2 className="w-5 h-5" />
+                          Servicio Completado
+                        </div>
+                      ) : (
+                        <Button 
+                          variant="primary" 
+                          className="w-full h-12 text-lg font-bold"
+                          onClick={() => handleArrive(index)}
+                          disabled={todayRoute.status === 'pending' || todayRoute.status === 'completed'}
+                        >
+                          Llegué
+                        </Button>
+                      )}
                     </motion.div>
                   )}
 

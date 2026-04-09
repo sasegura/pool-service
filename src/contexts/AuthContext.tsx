@@ -27,9 +27,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRoleState] = useState<'admin' | 'worker' | 'client' | null>('admin');
   const [loading, setLoading] = useState(false);
 
+  // In demo mode, we change the UID based on the role so that routes assigned 
+  // to "Worker" are visible when you switch to "Worker" role.
   const user = {
-    uid: 'mock-user-id',
-    displayName: 'Usuario Demo',
+    uid: role === 'worker' ? 'mock-worker-id' : (role === 'client' ? 'mock-client-id' : 'mock-admin-id'),
+    displayName: role === 'worker' ? 'Usuario Demo (Técnico)' : (role === 'client' ? 'Cliente Demo' : 'Usuario Demo (Admin)'),
     email: 'demo@example.com'
   };
 
@@ -63,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: new Date().toISOString()
       }, { merge: true });
     }
-  }, [role]);
+  }, [role, user.uid]);
 
   const setRole = (newRole: 'admin' | 'worker' | 'client') => {
     setRoleState(newRole);

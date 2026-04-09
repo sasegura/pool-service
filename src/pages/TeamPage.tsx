@@ -16,6 +16,7 @@ interface Worker {
 export default function TeamPage() {
   const [allUsers, setAllUsers] = useState<Worker[]>([]);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [newWorker, setNewWorker] = useState({ name: '', email: '', role: 'worker' });
 
   useEffect(() => {
@@ -28,22 +29,34 @@ export default function TeamPage() {
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const existing = allUsers.find(u => u.email === newWorker.email);
-      if (existing) {
-        toast.error('Este correo ya está registrado');
-        return;
-      }
+      if (editingUserId) {
+        await updateDoc(doc(db, 'users', editingUserId), newWorker);
+        toast.success('Usuario actualizado');
+      } else {
+        const existing = allUsers.find(u => u.email === newWorker.email);
+        if (existing) {
+          toast.error('Este correo ya está registrado');
+          return;
+        }
 
-      await addDoc(collection(db, 'users'), {
-        ...newWorker,
-        createdAt: new Date().toISOString(),
-      });
+        await addDoc(collection(db, 'users'), {
+          ...newWorker,
+          createdAt: new Date().toISOString(),
+        });
+        toast.success('Usuario pre-registrado');
+      }
       setNewWorker({ name: '', email: '', role: 'worker' });
       setShowWorkerForm(false);
-      toast.success('Usuario pre-registrado');
+      setEditingUserId(null);
     } catch (e) {
-      toast.error('Error al añadir usuario');
+      toast.error('Error al guardar usuario');
     }
+  };
+
+  const handleEdit = (user: Worker) => {
+    setNewWorker({ name: user.name, email: user.email, role: user.role });
+    setEditingUserId(user.id);
+    setShowWorkerForm(true);
   };
 
   const toggleRole = async (user: Worker) => {
@@ -70,7 +83,11 @@ export default function TeamPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-black text-slate-900">Gestión del Equipo</h2>
-        <Button size="sm" onClick={() => setShowWorkerForm(true)} className="gap-1">
+        <Button size="sm" onClick={() => {
+          setShowWorkerForm(true);
+          setEditingUserId(null);
+          setNewWorker({ name: '', email: '', role: 'worker' });
+        }} className="gap-1">
           <Plus className="w-4 h-4" /> Añadir Usuario
         </Button>
       </div>
@@ -78,6 +95,7 @@ export default function TeamPage() {
       {showWorkerForm && (
         <Card className="p-4 border-blue-200 bg-blue-50">
           <form onSubmit={handleAddWorker} className="space-y-4">
+            <h3 className="font-bold text-blue-900">{editingUserId ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre</label>
@@ -115,8 +133,11 @@ export default function TeamPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1">Pre-registrar Usuario</Button>
-              <Button variant="outline" onClick={() => setShowWorkerForm(false)}>Cancelar</Button>
+              <Button type="submit" className="flex-1">{editingUserId ? 'Actualizar' : 'Pre-registrar'} Usuario</Button>
+              <Button variant="outline" onClick={() => {
+                setShowWorkerForm(false);
+                setEditingUserId(null);
+              }}>Cancelar</Button>
             </div>
           </form>
         </Card>
@@ -150,10 +171,18 @@ export default function TeamPage() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => toggleRole(user)}
-                title="Cambiar rol"
+                onClick={() => handleEdit(user)}
+                title="Editar usuario"
               >
                 <Edit2 className="w-4 h-4" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => toggleRole(user)}
+                title="Cambiar rol rápido"
+              >
+                <Users className="w-4 h-4" />
               </Button>
               <Button 
                 variant="outline" 
