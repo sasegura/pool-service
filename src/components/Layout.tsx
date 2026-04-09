@@ -1,12 +1,13 @@
 import React from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { LogOut, Waves, User as UserIcon } from 'lucide-react';
+import { LogOut, Waves, LayoutDashboard, Map as MapIcon, Waves as PoolsIcon, Users } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 export default function Layout() {
-  const { user, role } = useAuth();
+  const { user, role, setRole } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -16,37 +17,78 @@ export default function Layout() {
 
   if (!user) return <Outlet />;
 
+  const navItems = [
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'worker', 'client'] },
+    { to: '/pools', label: 'Piscinas', icon: PoolsIcon, roles: ['admin'] },
+    { to: '/routes', label: 'Rutas', icon: MapIcon, roles: ['admin'] },
+    { to: '/team', label: 'Equipo', icon: Users, roles: ['admin'] },
+  ];
+
+  const filteredNav = navItems.filter(item => item.roles.includes(role as string));
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <div className="bg-blue-600 p-1.5 rounded-lg">
-            <Waves className="text-white w-5 h-5" />
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
+        <div className="px-4 py-3 flex items-center justify-between max-w-4xl mx-auto w-full">
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-600 p-1.5 rounded-lg">
+              <Waves className="text-white w-5 h-5" />
+            </div>
+            <h1 className="font-bold text-slate-900 tracking-tight hidden sm:block">Miami Pool Care</h1>
           </div>
-          <h1 className="font-bold text-slate-900 tracking-tight">Miami Pool Care</h1>
-        </div>
-        
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex flex-col items-end">
-            <span className="text-sm font-medium text-slate-900">{user.displayName}</span>
-            <span className="text-xs text-slate-500 capitalize">{role}</span>
+          
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col items-end">
+              <span className="text-sm font-bold text-slate-900">{user.displayName}</span>
+              <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">{role}</span>
+            </div>
           </div>
-          <button 
-            onClick={handleLogout}
-            className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-            title="Cerrar sesión"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
         </div>
+
+        {/* Navigation Menu */}
+        {filteredNav.length > 1 && (
+          <nav className="border-t border-slate-100 px-4 flex justify-center gap-1 sm:gap-4 overflow-x-auto no-scrollbar">
+            {filteredNav.map(item => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => cn(
+                  "flex items-center gap-2 px-3 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all",
+                  isActive 
+                    ? "border-blue-600 text-blue-600" 
+                    : "border-transparent text-slate-400 hover:text-slate-600"
+                )}
+              >
+                <item.icon className="w-4 h-4" />
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+          </nav>
+        )}
       </header>
 
-      <main className="flex-1 max-w-lg mx-auto w-full p-4 sm:max-w-4xl">
+      <main className="flex-1 max-w-4xl mx-auto w-full p-4">
         <Outlet />
       </main>
 
-      <footer className="bg-white border-t border-slate-200 p-4 text-center text-xs text-slate-400">
-        &copy; 2026 Miami Pool Care. Todos los derechos reservados.
+      <footer className="bg-white border-t border-slate-200 p-6 flex flex-col items-center gap-4">
+        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          {(['admin', 'worker', 'client'] as const).map((r) => (
+            <button
+              key={r}
+              onClick={() => setRole(r)}
+              className={cn(
+                "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                role === r ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+              )}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 font-medium">
+          &copy; 2026 Miami Pool Care. Modo Demo (Sin Autenticación)
+        </p>
       </footer>
     </div>
   );

@@ -4,11 +4,15 @@ import { db, auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
-import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play } from 'lucide-react';
+import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
+import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+
+const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
+const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
 interface Pool {
   id: string;
@@ -129,21 +133,71 @@ export default function WorkerDashboard() {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900">Mi Ruta</h2>
-          <p className="text-slate-500">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</p>
-        </div>
-        {todayRoute.status === 'pending' && (
-          <Button variant="primary" onClick={handleStartDay} className="gap-2">
-            <Play className="w-4 h-4" /> Comenzar Día
-          </Button>
-        )}
-      </header>
+  if (!GOOGLE_MAPS_API_KEY) {
+    return (
+      <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
+        <h2 className="text-xl font-bold text-amber-900 mb-2">Falta la API Key de Google Maps</h2>
+      </div>
+    );
+  }
 
-      <div className="space-y-4">
+  return (
+    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+      <div className="space-y-6">
+        <header className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-black text-slate-900">Mi Ruta</h2>
+            <p className="text-slate-500">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</p>
+          </div>
+          {todayRoute.status === 'pending' && (
+            <Button variant="primary" onClick={handleStartDay} className="gap-2">
+              <Play className="w-4 h-4" /> Comenzar Día
+            </Button>
+          )}
+        </header>
+
+        {/* Route Map */}
+        <Card className="overflow-hidden h-64 relative border-none shadow-lg">
+          <Map
+            defaultCenter={MIAMI_CENTER}
+            defaultZoom={11}
+            mapId="worker_route_map"
+          >
+            {todayRoute.poolIds.map((poolId, index) => {
+              const pool = pools[poolId];
+              if (!pool) return null;
+              return (
+                <AdvancedMarker
+                  key={pool.id}
+                  position={pool.coordinates || MIAMI_CENTER}
+                >
+                  <Pin 
+                    background={todayRoute.completedPools?.includes(pool.id) ? '#10b981' : '#2563eb'} 
+                    glyphColor={'#fff'} 
+                    borderColor={'#000'}
+                  >
+                    {(index + 1).toString()}
+                  </Pin>
+                </AdvancedMarker>
+              );
+            })}
+          </Map>
+          <div className="absolute bottom-4 left-4 right-4 bg-white/90 backdrop-blur p-3 rounded-xl shadow-xl flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                <MapIcon className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Progreso</div>
+                <div className="text-sm font-black text-slate-900">
+                  {todayRoute.completedPools?.length || 0} / {todayRoute.poolIds.length} Piscinas
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <div className="space-y-4">
         {todayRoute.poolIds.map((poolId, index) => {
           const pool = pools[poolId];
           if (!pool) return null;
@@ -245,5 +299,6 @@ export default function WorkerDashboard() {
         })}
       </div>
     </div>
+    </APIProvider>
   );
 }

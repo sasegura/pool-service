@@ -4,25 +4,29 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
 import Login from './pages/Login';
 import WorkerDashboard from './pages/WorkerDashboard';
-import AdminDashboard from './pages/AdminDashboard';
+import AdminOverview from './pages/AdminOverview';
+import PoolsPage from './pages/PoolsPage';
+import RoutesPage from './pages/RoutesPage';
+import TeamPage from './pages/TeamPage';
+import ClientDashboard from './pages/ClientDashboard';
 import Layout from './components/Layout';
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'admin' | 'worker' }> = ({ children, requiredRole }) => {
-  const { user, role, loading } = useAuth();
+const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'admin' | 'worker' | 'client' }> = ({ children, requiredRole }) => {
+  const { role, loading } = useAuth();
 
   if (loading) return <div className="flex items-center justify-center h-screen">Cargando...</div>;
-  if (!user) return <Navigate to="/login" />;
   if (requiredRole && role !== requiredRole) return <Navigate to="/" />;
 
   return <>{children}</>;
 };
 
-const HomeRedirect = () => {
+const DashboardSwitcher = () => {
   const { role, loading } = useAuth();
-  if (loading) return null;
-  if (role === 'admin') return <Navigate to="/admin" />;
-  if (role === 'worker') return <Navigate to="/worker" />;
-  return <Navigate to="/login" />;
+  if (loading) return <div className="p-8 text-center">Cargando...</div>;
+  if (role === 'admin') return <AdminOverview />;
+  if (role === 'worker') return <WorkerDashboard />;
+  if (role === 'client') return <ClientDashboard />;
+  return <div className="p-8 text-center text-red-500 font-bold">Error: Rol no definido</div>;
 };
 
 export default function App() {
@@ -30,26 +34,34 @@ export default function App() {
     <AuthProvider>
       <Router>
         <Routes>
-          <Route path="/login" element={<Login />} />
           <Route path="/" element={<Layout />}>
-            <Route index element={<HomeRedirect />} />
+            <Route index element={<DashboardSwitcher />} />
             <Route 
-              path="worker" 
+              path="pools" 
               element={
-                <ProtectedRoute requiredRole="worker">
-                  <WorkerDashboard />
+                <ProtectedRoute requiredRole="admin">
+                  <PoolsPage />
                 </ProtectedRoute>
               } 
             />
             <Route 
-              path="admin" 
+              path="routes" 
               element={
                 <ProtectedRoute requiredRole="admin">
-                  <AdminDashboard />
+                  <RoutesPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="team" 
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <TeamPage />
                 </ProtectedRoute>
               } 
             />
           </Route>
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>
       <Toaster position="top-center" richColors />

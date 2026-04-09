@@ -32,6 +32,10 @@ service cloud.firestore {
     function isWorker() {
       return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'worker';
     }
+    
+    function isClient() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'client';
+    }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
@@ -41,7 +45,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (isOwner(userId) || isAdmin());
-      allow update: if isAdmin();
+      allow update: if isAdmin() || isOwner(userId);
       allow delete: if isAdmin();
     }
 
@@ -61,8 +65,12 @@ service cloud.firestore {
 
     // Logs collection
     match /logs/{logId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isWorker() || 
+        (isClient() && get(/databases/$(database)/documents/pools/$(resource.data.poolId)).data.clientId == request.auth.uid)
+      );
+      allow create: if isAuthenticated() && (isAdmin() || isWorker());
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
