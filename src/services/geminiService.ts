@@ -1,6 +1,17 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let aiInstance: GoogleGenAI | null = null;
+
+function getAI() {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'undefined') {
+      throw new Error("GEMINI_API_KEY is not set. Please configure it in the Secrets panel.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+}
 
 export interface PoolLocation {
   id: string;
@@ -24,7 +35,8 @@ export async function optimizeRoute(pools: PoolLocation[]): Promise<string[]> {
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const ai = getAI();
+    const response = await ai.models.generateContent({ 
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
@@ -36,10 +48,11 @@ export async function optimizeRoute(pools: PoolLocation[]): Promise<string[]> {
       }
     });
 
-    const result = JSON.parse(response.text || "[]");
+    const text = response.text;
+    const optimizedIds = JSON.parse(text || "[]");
     
     // Validate that all returned IDs exist in the original list
-    const validIds = result.filter((id: string) => pools.some(p => p.id === id));
+    const validIds = optimizedIds.filter((id: string) => pools.some(p => p.id === id));
     
     // If for some reason Gemini missed some IDs, append them at the end
     const missingIds = pools.filter(p => !validIds.includes(p.id)).map(p => p.id);
