@@ -10,6 +10,14 @@ export default defineConfig(({mode}) => {
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
+    optimizeDeps: {
+      include: ['@vis.gl/react-google-maps'],
+    },
+    build: {
+      commonjsOptions: {
+        include: [/@vis.gl\/react-google-maps/, /node_modules/],
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
