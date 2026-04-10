@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, Timestamp, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, Timestamp, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card } from '../components/ui/Common';
@@ -25,12 +25,20 @@ interface Route {
   id: string;
   poolIds: string[];
   status: 'pending' | 'in-progress' | 'completed';
-  date: string;
+  date?: string;
+  workerId?: string;
+  routeName?: string;
+  startTime?: string;
+  endTime?: string;
+  completedPools?: string[];
+  lastPoolId?: string;
+  lastStatus?: 'ok' | 'issue';
 }
 
 export default function WorkerDashboard() {
   const { user } = useAuth();
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
+  const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [hasOtherRoutes, setHasOtherRoutes] = useState(false);
   const [pools, setPools] = useState<Record<string, Pool>>({});
   const [loading, setLoading] = useState(true);
@@ -38,6 +46,7 @@ export default function WorkerDashboard() {
   const [visitStatus, setVisitStatus] = useState<'idle' | 'arrived'>('idle');
   const [incidenceMode, setIncidenceMode] = useState(false);
   const [notes, setNotes] = useState('');
+  const [notifyClient, setNotifyClient] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -69,16 +78,77 @@ export default function WorkerDashboard() {
         setPools(poolMap);
       } else {
         setTodayRoute(null);
+        // Fetch available routes (no date and (no worker or is me))
+        const qAvailable = query(
+          collection(db, 'routes'),
+          where('date', '==', '')
+        );
+        const unsubAvailable = onSnapshot(qAvailable, (snap) => {
+          const routes = snap.docs
+            .map(d => ({ id: d.id, ...d.data() } as Route))
+            .filter(r => !r.workerId || r.workerId === user.uid);
+          setAvailableRoutes(routes);
+        });
+
         // Check if there are routes for other days
         const allRoutesQ = query(collection(db, 'routes'), where('workerId', '==', user.uid));
         const allRoutesSnap = await getDocs(allRoutesQ);
         setHasOtherRoutes(!allRoutesSnap.empty);
+        
+        return () => unsubAvailable();
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !todayRoute || todayRoute.status !== 'in-progress') return;
+
+    if (!navigator.geolocation) {
+      console.error('Geolocation is not supported by your browser');
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          await updateDoc(doc(db, 'users', user.uid), {
+            lastLocation: { lat: latitude, lng: longitude },
+            lastActive: serverTimestamp()
+          });
+        } catch (error) {
+          console.error('Error updating location:', error);
+        }
+      },
+      (error) => {
+        console.error('Error watching position:', error);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [user, todayRoute?.status]);
+
+  const handlePickRoute = async (routeId: string) => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    try {
+      await updateDoc(doc(db, 'routes', routeId), {
+        workerId: user?.uid,
+        date: today,
+        status: 'pending'
+      });
+      toast.success('Ruta asignada correctamente');
+    } catch (e) {
+      toast.error('Error al asignar la ruta');
+    }
+  };
 
   const handleStartDay = async () => {
     if (!todayRoute) return;
@@ -117,6 +187,7 @@ export default function WorkerDashboard() {
         departureTime: Timestamp.now(),
         status,
         notes: status === 'issue' ? notes : '',
+        notifyClient: status === 'issue' ? notifyClient : true,
         date: todayRoute.date
       });
 
@@ -141,6 +212,7 @@ export default function WorkerDashboard() {
       setActivePoolIndex(null);
       setIncidenceMode(false);
       setNotes('');
+      setNotifyClient(true);
 
       // Check if all done
       // (In a real app, we'd track progress more granularly)
@@ -157,17 +229,48 @@ export default function WorkerDashboard() {
 
   if (!todayRoute) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <div className="bg-slate-100 p-6 rounded-full mb-6">
-          <Clock className="w-12 h-12 text-slate-400" />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">No tienes ruta asignada hoy</h2>
-        {hasOtherRoutes ? (
-          <p className="text-slate-500">Tienes rutas asignadas para otros días, pero ninguna para hoy ({format(new Date(), 'dd/MM/yyyy')}).</p>
+      <div className="space-y-6">
+        <header>
+          <h2 className="text-2xl font-black text-slate-900">Mi Jornada</h2>
+          <p className="text-slate-500">Selecciona una ruta para comenzar hoy</p>
+        </header>
+
+        {availableRoutes.length > 0 ? (
+          <div className="grid gap-4">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Rutas Disponibles</h3>
+            {availableRoutes.map(route => (
+              <Card key={route.id} className="p-5 hover:border-blue-300 transition-all group">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                      <MapIcon className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-lg">{route.routeName || 'Ruta sin nombre'}</h4>
+                      <p className="text-sm text-slate-500">{route.poolIds.length} piscinas en esta ruta</p>
+                    </div>
+                  </div>
+                  <Button onClick={() => handlePickRoute(route.id)} className="gap-2">
+                    Elegir esta ruta
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
         ) : (
-          <p className="text-slate-500">No se han encontrado rutas asignadas a tu usuario.</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="bg-slate-100 p-6 rounded-full mb-6">
+              <Clock className="w-12 h-12 text-slate-400" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 mb-2">No tienes ruta asignada hoy</h2>
+            {hasOtherRoutes ? (
+              <p className="text-slate-500">Tienes rutas asignadas para otros días, pero ninguna para hoy ({format(new Date(), 'dd/MM/yyyy')}).</p>
+            ) : (
+              <p className="text-slate-500">No hay rutas disponibles para elegir en este momento.</p>
+            )}
+            <p className="text-xs text-slate-400 mt-4 italic">ID de Usuario: {user.uid}</p>
+          </div>
         )}
-        <p className="text-xs text-slate-400 mt-4 italic">ID de Usuario: {user.uid}</p>
       </div>
     );
   }
@@ -357,6 +460,17 @@ export default function WorkerDashboard() {
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
                           />
+                          <label className="flex items-center gap-2 cursor-pointer group">
+                            <input 
+                              type="checkbox" 
+                              className="w-4 h-4 rounded border-red-300 text-red-600 focus:ring-red-500"
+                              checked={notifyClient}
+                              onChange={(e) => setNotifyClient(e.target.checked)}
+                            />
+                            <span className="text-xs font-bold text-red-800 group-hover:text-red-900 transition-colors">
+                              Notificar al cliente (mostrar en su historial)
+                            </span>
+                          </label>
                           <div className="flex gap-2">
                             <Button variant="outline" className="flex-1" onClick={() => setIncidenceMode(false)}>Cancelar</Button>
                             <Button variant="danger" className="flex-1" onClick={() => handleFinish('issue')} disabled={!notes.trim()}>Reportar</Button>

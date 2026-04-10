@@ -17,20 +17,30 @@ interface Pool {
 interface Log {
   id: string;
   poolId: string;
-  workerName: string;
-  timestamp: any;
+  workerId: string;
+  arrivalTime: any;
   status: 'ok' | 'issue';
   notes?: string;
+  date: string;
+  notifyClient?: boolean;
 }
 
 export default function ClientDashboard() {
   const { user } = useAuth();
   const [pools, setPools] = useState<Pool[]>([]);
   const [logs, setLogs] = useState<Log[]>([]);
+  const [workers, setWorkers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
+
+    // Fetch workers to resolve names
+    const unsubWorkers = onSnapshot(collection(db, 'users'), (snap) => {
+      const wMap: Record<string, string> = {};
+      snap.docs.forEach(d => wMap[d.id] = d.data().name);
+      setWorkers(wMap);
+    });
 
     // Fetch pools owned by this client
     const qPools = query(collection(db, 'pools'), where('clientId', '==', user.uid));
@@ -44,11 +54,21 @@ export default function ClientDashboard() {
         const qLogs = query(
           collection(db, 'logs'), 
           where('poolId', 'in', poolIds),
-          orderBy('timestamp', 'desc')
+          orderBy('date', 'desc')
         );
         
         const unsubLogs = onSnapshot(qLogs, (snap) => {
-          setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() } as Log)));
+          const logsData = snap.docs
+            .map(d => ({ id: d.id, ...d.data() } as Log))
+            .filter(log => log.notifyClient !== false); // Default to true if missing, but explicitly check for false
+          
+          // Sort by arrivalTime if available, otherwise by date
+          const sortedLogs = logsData.sort((a, b) => {
+            const timeA = a.arrivalTime?.toMillis?.() || 0;
+            const timeB = b.arrivalTime?.toMillis?.() || 0;
+            return timeB - timeA;
+          });
+          setLogs(sortedLogs);
           setLoading(false);
         });
 
@@ -58,7 +78,10 @@ export default function ClientDashboard() {
       }
     });
 
-    return () => unsubPools();
+    return () => {
+      unsubWorkers();
+      unsubPools();
+    };
   }, [user]);
 
   if (loading) return <div className="p-8 text-center">Cargando historial...</div>;
@@ -113,17 +136,17 @@ export default function ClientDashboard() {
                                 {log.status === 'ok' ? 'Servicio Completado' : 'Incidencia Reportada'}
                               </span>
                               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase tracking-tighter">
-                                {log.workerName}
+                                {workers[log.workerId] || 'Técnico'}
                               </span>
                             </div>
                             <div className="flex items-center text-xs text-slate-500 font-bold gap-3">
                               <div className="flex items-center">
                                 <Calendar className="w-3 h-3 mr-1" />
-                                {log.timestamp?.toDate ? format(log.timestamp.toDate(), "d MMM, yyyy", { locale: es }) : 'Recientemente'}
+                                {log.arrivalTime?.toDate ? format(log.arrivalTime.toDate(), "d MMM, yyyy", { locale: es }) : log.date}
                               </div>
                               <div className="flex items-center">
                                 <Clock className="w-3 h-3 mr-1" />
-                                {log.timestamp?.toDate ? format(log.timestamp.toDate(), "HH:mm") : ''}
+                                {log.arrivalTime?.toDate ? format(log.arrivalTime.toDate(), "HH:mm") : '--:--'}
                               </div>
                             </div>
                             {log.notes && (

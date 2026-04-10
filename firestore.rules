@@ -68,7 +68,9 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isAdmin() || 
         isWorker() || 
-        (isClient() && get(/databases/$(database)/documents/pools/$(resource.data.poolId)).data.clientId == request.auth.uid)
+        (isClient() && 
+         get(/databases/$(database)/documents/pools/$(resource.data.poolId)).data.clientId == request.auth.uid &&
+         (resource.data.status == 'ok' || resource.data.get('notifyClient', true) == true))
       );
       allow create: if isAuthenticated() && (isAdmin() || isWorker());
       allow update: if isAdmin();

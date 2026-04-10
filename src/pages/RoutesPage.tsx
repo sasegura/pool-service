@@ -3,10 +3,11 @@ import { collection, onSnapshot, addDoc, doc, deleteDoc, query, updateDoc } from
 import { db } from '../lib/firebase';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
-import { Plus, Calendar, Trash2, Map as MapIcon, List, AlertCircle, Edit2 } from 'lucide-react';
+import { Plus, Calendar, Trash2, Map as MapIcon, List, AlertCircle, Edit2, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import { optimizeRoute } from '../services/geminiService';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -26,8 +27,9 @@ interface Worker {
 
 interface Route {
   id: string;
-  workerId: string;
-  date: string;
+  workerId?: string;
+  date?: string;
+  routeName?: string;
   poolIds: string[];
   status: 'pending' | 'in-progress' | 'completed';
 }
@@ -39,8 +41,16 @@ export default function RoutesPage() {
   const [showRouteForm, setShowRouteForm] = useState(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
-  const [newRoute, setNewRoute] = useState({ workerId: '', date: format(new Date(), 'yyyy-MM-dd'), poolIds: [] as string[] });
+  const [newRoute, setNewRoute] = useState({ 
+    workerId: '', 
+    date: format(new Date(), 'yyyy-MM-dd'), 
+    poolIds: [] as string[],
+    routeName: '',
+    noDate: false,
+    noWorker: false
+  });
   const [routeViewMode, setRouteViewMode] = useState<'list' | 'map'>('list');
+  const [isOptimizing, setIsOptimizing] = useState(false);
 
   const selectedRoute = routes.find(r => r.id === selectedRouteId);
   const selectedRoutePools = (selectedRoute?.poolIds || []).map(id => pools.find(p => p.id === id)).filter(Boolean) as Pool[];
@@ -69,22 +79,34 @@ export default function RoutesPage() {
 
   const handleAddRoute = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRoute.workerId || newRoute.poolIds.length === 0) {
-      toast.error('Selecciona un trabajador y al menos una piscina');
+    if (newRoute.poolIds.length === 0) {
+      toast.error('Selecciona al menos una piscina');
       return;
     }
     try {
+      const routeToSave = {
+        poolIds: newRoute.poolIds,
+        routeName: newRoute.routeName || '',
+        workerId: newRoute.noWorker ? '' : newRoute.workerId,
+        date: newRoute.noDate ? '' : newRoute.date,
+        status: 'pending'
+      };
+
       if (editingRouteId) {
-        await updateDoc(doc(db, 'routes', editingRouteId), newRoute);
+        await updateDoc(doc(db, 'routes', editingRouteId), routeToSave);
         toast.success('Ruta actualizada');
       } else {
-        await addDoc(collection(db, 'routes'), {
-          ...newRoute,
-          status: 'pending'
-        });
-        toast.success('Ruta asignada');
+        await addDoc(collection(db, 'routes'), routeToSave);
+        toast.success('Ruta guardada');
       }
-      setNewRoute({ workerId: '', date: format(new Date(), 'yyyy-MM-dd'), poolIds: [] });
+      setNewRoute({ 
+        workerId: '', 
+        date: format(new Date(), 'yyyy-MM-dd'), 
+        poolIds: [], 
+        routeName: '',
+        noDate: false,
+        noWorker: false
+      });
       setShowRouteForm(false);
       setEditingRouteId(null);
     } catch (e) {
@@ -93,7 +115,14 @@ export default function RoutesPage() {
   };
 
   const handleEdit = (route: Route) => {
-    setNewRoute({ workerId: route.workerId, date: route.date, poolIds: route.poolIds });
+    setNewRoute({ 
+      workerId: route.workerId || '', 
+      date: route.date || format(new Date(), 'yyyy-MM-dd'), 
+      poolIds: route.poolIds,
+      routeName: route.routeName || '',
+      noDate: !route.date,
+      noWorker: !route.workerId
+    });
     setEditingRouteId(route.id);
     setShowRouteForm(true);
   };
@@ -127,6 +156,28 @@ export default function RoutesPage() {
     }
   };
 
+  const handleOptimize = async () => {
+    if (newRoute.poolIds.length < 2) {
+      toast.error('Selecciona al menos 2 piscinas para optimizar');
+      return;
+    }
+
+    setIsOptimizing(true);
+    try {
+      const selectedPools = newRoute.poolIds
+        .map(id => pools.find(p => p.id === id))
+        .filter(Boolean) as any[];
+      
+      const optimizedIds = await optimizeRoute(selectedPools);
+      setNewRoute(prev => ({ ...prev, poolIds: optimizedIds }));
+      toast.success('Ruta optimizada con IA');
+    } catch (error) {
+      toast.error('Error al optimizar la ruta');
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
   if (!GOOGLE_MAPS_API_KEY) {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
@@ -144,7 +195,14 @@ export default function RoutesPage() {
           <Button size="sm" onClick={() => {
             setShowRouteForm(true);
             setEditingRouteId(null);
-            setNewRoute({ workerId: '', date: format(new Date(), 'yyyy-MM-dd'), poolIds: [] });
+            setNewRoute({ 
+              workerId: '', 
+              date: format(new Date(), 'yyyy-MM-dd'), 
+              poolIds: [], 
+              routeName: '',
+              noDate: false,
+              noWorker: false
+            });
           }} className="gap-1">
             <Plus className="w-4 h-4" /> Nueva Ruta
           </Button>
@@ -154,46 +212,95 @@ export default function RoutesPage() {
           <Card className="p-4 border-blue-200 bg-blue-50">
             <form onSubmit={handleAddRoute} className="space-y-4">
               <h3 className="font-bold text-blue-900">{editingRouteId ? 'Editar Ruta' : 'Nueva Ruta'}</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Trabajador</label>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre de la Ruta (Opcional)</label>
+                <input 
+                  type="text" 
+                  className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                  placeholder="Ej: Ruta Norte, Ruta Especial..."
+                  value={newRoute.routeName}
+                  onChange={e => setNewRoute({...newRoute, routeName: e.target.value})}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-500 uppercase">Trabajador</label>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={newRoute.noWorker} 
+                        onChange={e => setNewRoute({...newRoute, noWorker: e.target.checked})}
+                        className="rounded border-slate-300"
+                      /> Sin asignar
+                    </label>
+                  </div>
                   <select 
-                    className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                    className="w-full rounded-lg border-slate-200 p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
                     value={newRoute.workerId}
                     onChange={e => setNewRoute({...newRoute, workerId: e.target.value})}
+                    disabled={newRoute.noWorker}
                   >
                     <option value="">Seleccionar...</option>
                     {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha</label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-500 uppercase">Fecha</label>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={newRoute.noDate} 
+                        onChange={e => setNewRoute({...newRoute, noDate: e.target.checked})}
+                        className="rounded border-slate-300"
+                      /> Sin fecha
+                    </label>
+                  </div>
                   <input 
                     type="date" 
-                    className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                    className="w-full rounded-lg border-slate-200 p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
                     value={newRoute.date}
                     onChange={e => setNewRoute({...newRoute, date: e.target.value})}
+                    disabled={newRoute.noDate}
                   />
                 </div>
               </div>
 
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-500 uppercase">Selección de Piscinas (Orden de parada)</label>
-                <div className="flex bg-white p-0.5 rounded-lg border border-slate-200">
-                  <button 
+                <div className="flex items-center gap-2">
+                  <button
                     type="button"
-                    onClick={() => setRouteViewMode('list')}
-                    className={cn("p-1.5 rounded-md", routeViewMode === 'list' ? "bg-blue-50 text-blue-600" : "text-slate-400")}
+                    onClick={handleOptimize}
+                    disabled={isOptimizing || newRoute.poolIds.length < 2}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
-                    <List className="w-4 h-4" />
+                    {isOptimizing ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3 h-3" />
+                    )}
+                    OPTIMIZAR CON IA
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => setRouteViewMode('map')}
-                    className={cn("p-1.5 rounded-md", routeViewMode === 'map' ? "bg-blue-50 text-blue-600" : "text-slate-400")}
-                  >
-                    <MapIcon className="w-4 h-4" />
-                  </button>
+                  <div className="flex bg-white p-0.5 rounded-lg border border-slate-200">
+                    <button 
+                      type="button"
+                      onClick={() => setRouteViewMode('list')}
+                      className={cn("p-1.5 rounded-md", routeViewMode === 'list' ? "bg-blue-50 text-blue-600" : "text-slate-400")}
+                    >
+                      <List className="w-4 h-4" />
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setRouteViewMode('map')}
+                      className={cn("p-1.5 rounded-md", routeViewMode === 'map' ? "bg-blue-50 text-blue-600" : "text-slate-400")}
+                    >
+                      <MapIcon className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -321,53 +428,100 @@ export default function RoutesPage() {
         )}
 
         <div className="grid gap-4">
-          {routes.map(route => {
-            const worker = workers.find(w => w.id === route.workerId);
-            const isSelected = selectedRouteId === route.id;
-            return (
-              <Card 
-                key={route.id} 
-                className={cn(
-                  "p-4 transition-all cursor-pointer",
-                  isSelected ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/30" : "hover:border-blue-200"
-                )}
-                onClick={() => setSelectedRouteId(isSelected ? null : route.id)}
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "p-2 rounded-lg transition-colors",
-                      isSelected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"
-                    )}>
-                      <Calendar className="w-5 h-5" />
+          <div className="space-y-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Rutas Asignadas</h3>
+            {routes.filter(r => r.date).map(route => {
+              const worker = workers.find(w => w.id === route.workerId);
+              const isSelected = selectedRouteId === route.id;
+              return (
+                <Card 
+                  key={route.id} 
+                  className={cn(
+                    "p-4 transition-all cursor-pointer",
+                    isSelected ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/30" : "hover:border-blue-200"
+                  )}
+                  onClick={() => setSelectedRouteId(isSelected ? null : route.id)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "p-2 rounded-lg transition-colors",
+                        isSelected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"
+                      )}>
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900">{route.routeName || worker?.name || 'Ruta sin nombre'}</h4>
+                        <p className="text-xs text-slate-500">{route.date} • {route.poolIds.length} piscinas • {worker?.name || 'Sin asignar'}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900">{worker?.name || 'Desconocido'}</h4>
-                      <p className="text-xs text-slate-500">{route.date} • {route.poolIds.length} piscinas</p>
+                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <div className={cn(
+                        "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                        route.status === 'completed' ? "bg-emerald-100 text-emerald-700" :
+                        route.status === 'in-progress' ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"
+                      )}>
+                        {route.status}
+                      </div>
+                      <button 
+                        onClick={() => handleEdit(route)} 
+                        className="p-1 text-slate-400 hover:text-blue-600"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => deleteRoute(route.id)} className="p-1 text-slate-400 hover:text-red-600">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                    <div className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase",
-                      route.status === 'completed' ? "bg-emerald-100 text-emerald-700" :
-                      route.status === 'in-progress' ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"
-                    )}>
-                      {route.status}
+                </Card>
+              );
+            })}
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Plantillas / Rutas sin fecha</h3>
+            {routes.filter(r => !r.date).map(route => {
+              const worker = workers.find(w => w.id === route.workerId);
+              const isSelected = selectedRouteId === route.id;
+              return (
+                <Card 
+                  key={route.id} 
+                  className={cn(
+                    "p-4 transition-all cursor-pointer border-dashed",
+                    isSelected ? "border-indigo-500 ring-1 ring-indigo-500 bg-indigo-50/30" : "hover:border-indigo-200"
+                  )}
+                  onClick={() => setSelectedRouteId(isSelected ? null : route.id)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "p-2 rounded-lg transition-colors",
+                        isSelected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"
+                      )}>
+                        <Sparkles className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900">{route.routeName || 'Ruta sin nombre'}</h4>
+                        <p className="text-xs text-slate-500">{route.poolIds.length} piscinas • {worker?.name || 'Cualquier técnico puede elegir'}</p>
+                      </div>
                     </div>
-                    <button 
-                      onClick={() => handleEdit(route)} 
-                      className="p-1 text-slate-400 hover:text-blue-600"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => deleteRoute(route.id)} className="p-1 text-slate-400 hover:text-red-600">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <button 
+                        onClick={() => handleEdit(route)} 
+                        className="p-1 text-slate-400 hover:text-blue-600"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => deleteRoute(route.id)} className="p-1 text-slate-400 hover:text-red-600">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            );
-          })}
+                </Card>
+              );
+            })}
+          </div>
         </div>
       </div>
     </APIProvider>

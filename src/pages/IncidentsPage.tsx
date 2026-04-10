@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Card } from '../components/ui/Common';
-import { AlertCircle, Calendar, MapPin, User, Clock } from 'lucide-react';
+import { Button, Card } from '../components/ui/Common';
+import { AlertCircle, Calendar, MapPin, User, Clock, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -31,6 +31,7 @@ export default function IncidentsPage() {
   const [pools, setPools] = useState<Record<string, string>>({});
   const [workers, setWorkers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [filterDate, setFilterDate] = useState<string>('');
 
   useEffect(() => {
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
@@ -45,10 +46,18 @@ export default function IncidentsPage() {
       setWorkers(wMap);
     });
 
-    const q = query(collection(db, 'logs'), orderBy('date', 'desc'));
+    let q = query(collection(db, 'logs'), orderBy('date', 'desc'));
+    
+    if (filterDate) {
+      q = query(collection(db, 'logs'), where('date', '==', filterDate), orderBy('date', 'desc'));
+    }
+
     const unsubLogs = onSnapshot(q, (snap) => {
       const allLogs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Incident));
       setIncidents(allLogs.filter(log => log.status === 'issue'));
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching incidents:", error);
       setLoading(false);
     });
 
@@ -57,13 +66,35 @@ export default function IncidentsPage() {
       unsubWorkers();
       unsubLogs();
     };
-  }, []);
+  }, [filterDate]);
 
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-2xl font-black text-slate-900">Incidencias Reportadas</h2>
-        <p className="text-slate-500 font-medium">Historial de problemas detectados durante los servicios</p>
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-black text-slate-900">Incidencias Reportadas</h2>
+          <p className="text-slate-500 font-medium">Historial de problemas detectados durante los servicios</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative flex items-center">
+            <Calendar className="absolute left-3 w-4 h-4 text-slate-400 pointer-events-none" />
+            <input 
+              type="date" 
+              className="pl-10 pr-10 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+            />
+            {filterDate && (
+              <button 
+                onClick={() => setFilterDate('')}
+                className="absolute right-3 p-1 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+                title="Limpiar filtro"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
       </header>
 
       {loading ? (

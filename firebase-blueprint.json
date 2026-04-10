@@ -7,8 +7,16 @@
       "properties": {
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["admin", "worker"] },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "role": { "type": "string", "enum": ["admin", "worker", "client"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLocation": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "lastActive": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "email", "role"]
     },
@@ -32,9 +40,10 @@
     },
     "Route": {
       "title": "Route",
-      "description": "Daily route for a worker",
+      "description": "Daily route for a worker or a template",
       "type": "object",
       "properties": {
+        "routeName": { "type": "string", "description": "Optional name for the route (e.g. 'Ruta Norte')" },
         "workerId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
         "poolIds": {
@@ -43,7 +52,7 @@
         },
         "status": { "type": "string", "enum": ["pending", "in-progress", "completed"] }
       },
-      "required": ["workerId", "date", "poolIds"]
+      "required": ["poolIds"]
     },
     "Log": {
       "title": "Log",
@@ -56,6 +65,7 @@
         "departureTime": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["ok", "issue"] },
         "notes": { "type": "string" },
+        "notifyClient": { "type": "boolean", "description": "Whether to show this log to the client" },
         "photos": {
           "type": "array",
           "items": { "type": "string" }
