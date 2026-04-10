@@ -36,7 +36,7 @@ interface Route {
 }
 
 export default function WorkerDashboard() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [hasOtherRoutes, setHasOtherRoutes] = useState(false);
@@ -49,7 +49,7 @@ export default function WorkerDashboard() {
   const [notifyClient, setNotifyClient] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (authLoading || !user) return;
 
     const today = format(new Date(), 'yyyy-MM-dd');
     const q = query(

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
+import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
@@ -25,19 +25,35 @@ const AuthContext = createContext<AuthContextType>({
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [role, setRoleState] = useState<'admin' | 'worker' | 'client' | null>('admin');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<User | null>(null);
 
-  // In demo mode, we change the UID based on the role so that routes assigned 
-  // to "Worker" are visible when you switch to "Worker" role.
-  const user = {
-    uid: role === 'worker' ? 'mock-worker-id' : (role === 'client' ? 'mock-client-id' : 'mock-admin-id'),
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setAuthUser(user);
+        setLoading(false);
+      } else {
+        try {
+          await signInAnonymously(auth);
+        } catch (error) {
+          console.error("Error signing in anonymously:", error);
+          setLoading(false);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const user = authUser ? {
+    uid: authUser.uid,
     displayName: role === 'worker' ? 'Usuario Demo (Técnico)' : (role === 'client' ? 'Cliente Demo' : 'Usuario Demo (Admin)'),
-    email: 'demo@example.com'
-  };
+    email: authUser.email || 'demo@example.com'
+  } : null;
 
   // Sync mock user to Firestore so it appears in lists (Team, Routes, etc.)
   useEffect(() => {
-    if (role) {
+    if (role && user?.uid) {
       // Current user
       setDoc(doc(db, 'users', user.uid), {
         name: user.displayName,
@@ -65,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: new Date().toISOString()
       }, { merge: true });
     }
-  }, [role, user.uid]);
+  }, [role, user?.uid]);
 
   const setRole = (newRole: 'admin' | 'worker' | 'client') => {
     setRoleState(newRole);

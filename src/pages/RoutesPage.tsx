@@ -34,7 +34,10 @@ interface Route {
   status: 'pending' | 'in-progress' | 'completed';
 }
 
+import { useAuth } from '../contexts/AuthContext';
+
 export default function RoutesPage() {
+  const { user, loading: authLoading } = useAuth();
   const [pools, setPools] = useState<Pool[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -60,6 +63,8 @@ export default function RoutesPage() {
     : MIAMI_CENTER;
 
   useEffect(() => {
+    if (authLoading || !user) return;
+
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as Pool)));
     });

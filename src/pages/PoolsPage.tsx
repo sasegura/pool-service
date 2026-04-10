@@ -89,7 +89,10 @@ interface Client {
   role: string;
 }
 
+import { useAuth } from '../contexts/AuthContext';
+
 export default function PoolsPage() {
+  const { user, loading: authLoading } = useAuth();
   const [pools, setPools] = useState<Pool[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [showPoolForm, setShowPoolForm] = useState(false);
@@ -99,6 +102,8 @@ export default function PoolsPage() {
   const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading || !user) return;
+
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as Pool)));
     });

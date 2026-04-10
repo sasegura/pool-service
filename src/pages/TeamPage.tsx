@@ -13,13 +13,18 @@ interface Worker {
   role: string;
 }
 
+import { useAuth } from '../contexts/AuthContext';
+
 export default function TeamPage() {
+  const { user, loading: authLoading } = useAuth();
   const [allUsers, setAllUsers] = useState<Worker[]>([]);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [newWorker, setNewWorker] = useState({ name: '', email: '', role: 'worker' });
 
   useEffect(() => {
+    if (authLoading || !user) return;
+
     const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
       setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Worker)));
     });

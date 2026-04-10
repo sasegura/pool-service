@@ -36,8 +36,11 @@ interface Pool {
   name: string;
 }
 
+import { useAuth } from '../contexts/AuthContext';
+
 export default function AdminOverview() {
   const navigate = useNavigate();
+  const { user, loading } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [poolsCount, setPoolsCount] = useState(0);
   const [workersCount, setWorkersCount] = useState(0);
@@ -50,6 +53,8 @@ export default function AdminOverview() {
   const [liveWorkers, setLiveWorkers] = useState<User[]>([]);
 
   useEffect(() => {
+    if (loading || !user) return;
+
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
       setPoolsCount(snap.size);
       const pMap: Record<string, string> = {};

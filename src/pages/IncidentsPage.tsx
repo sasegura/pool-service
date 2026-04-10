@@ -26,7 +26,10 @@ interface Worker {
   name: string;
 }
 
+import { useAuth } from '../contexts/AuthContext';
+
 export default function IncidentsPage() {
+  const { user, loading: authLoading } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
   const [workers, setWorkers] = useState<Record<string, string>>({});
@@ -34,6 +37,8 @@ export default function IncidentsPage() {
   const [filterDate, setFilterDate] = useState<string>('');
 
   useEffect(() => {
+    if (authLoading || !user) return;
+
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
       const pMap: Record<string, string> = {};
       snap.docs.forEach(d => pMap[d.id] = d.data().name);
