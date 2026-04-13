@@ -10,7 +10,7 @@ import { format, isWithinInterval, parseISO, getDay, addDays, startOfDay } from 
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
-import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -40,6 +40,69 @@ interface Route {
   lastPoolId?: string;
   lastStatus?: 'ok' | 'issue';
   templateId?: string;
+}
+
+function WorkerRouteMap({
+  poolIds,
+  pools,
+  completedPoolIds,
+}: {
+  poolIds: string[];
+  pools: Record<string, Pool>;
+  completedPoolIds?: string[];
+}) {
+  const [markersReady, setMarkersReady] = useState(false);
+  const defaultCenter = React.useMemo(() => {
+    for (const id of poolIds) {
+      const c = pools[id]?.coordinates;
+      if (c) return c;
+    }
+    return MIAMI_CENTER;
+  }, [poolIds, pools]);
+
+  return (
+    <Map
+      defaultCenter={defaultCenter}
+      defaultZoom={12}
+      style={{ width: '100%', height: '100%', minHeight: 256 }}
+      className="h-full w-full"
+      onTilesLoaded={() => setMarkersReady(true)}
+    >
+      {markersReady &&
+        poolIds.map((poolId, index) => {
+          const pool = pools[poolId];
+          if (!pool?.coordinates) return null;
+          const done = completedPoolIds?.includes(pool.id) ?? false;
+          return (
+            <Marker
+              key={pool.id}
+              position={pool.coordinates}
+              title={pool.name}
+              label={{
+                text: String(index + 1),
+                color: '#ffffff',
+                fontWeight: 'bold',
+                fontSize: '11px',
+              }}
+              optimized
+              icon={
+                typeof google !== 'undefined' && google.maps?.SymbolPath
+                  ? {
+                      path: google.maps.SymbolPath.CIRCLE,
+                      scale: 10,
+                      fillColor: done ? '#10b981' : '#2563eb',
+                      fillOpacity: 1,
+                      strokeColor: '#0f172a',
+                      strokeWeight: 1,
+                      labelOrigin: new google.maps.Point(0, 0),
+                    }
+                  : undefined
+              }
+            />
+          );
+        })}
+    </Map>
+  );
 }
 
 export default function WorkerDashboard() {
@@ -469,31 +532,14 @@ export default function WorkerDashboard() {
 
         {/* Route Map */}
         <Card className="overflow-hidden h-64 relative border-none shadow-lg">
-          <Map
-            defaultCenter={MIAMI_CENTER}
-            defaultZoom={11}
-            mapId="worker_route_map"
-          >
-            {todayRoute.poolIds.map((poolId, index) => {
-              const pool = pools[poolId];
-              if (!pool) return null;
-              return (
-                <AdvancedMarker
-                  key={pool.id}
-                  position={pool.coordinates || MIAMI_CENTER}
-                >
-                  <Pin 
-                    background={todayRoute.completedPools?.includes(pool.id) ? '#10b981' : '#2563eb'} 
-                    glyphColor={'#fff'} 
-                    borderColor={'#000'}
-                  >
-                    {(index + 1).toString()}
-                  </Pin>
-                </AdvancedMarker>
-              );
-            })}
-          </Map>
-          <div className="absolute bottom-4 left-4 right-4 bg-white/90 backdrop-blur p-3 rounded-xl shadow-xl flex items-center justify-between">
+          <div className="absolute inset-0 z-0 min-h-[16rem]">
+            <WorkerRouteMap
+              poolIds={todayRoute.poolIds}
+              pools={pools}
+              completedPoolIds={todayRoute.completedPools}
+            />
+          </div>
+          <div className="absolute bottom-4 left-4 right-4 z-10 bg-white/90 backdrop-blur p-3 rounded-xl shadow-xl flex items-center justify-between pointer-events-none">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
                 <MapIcon className="w-5 h-5" />

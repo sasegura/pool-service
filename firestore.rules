@@ -88,9 +88,13 @@ service cloud.firestore {
         isAdmin() || 
         userId in ['demo-worker-id', 'demo-client-id']
       );
-      // Allow users to update their own profile (but not their role unless they are admin)
-      // For the demo, we allow self-role-update if they are owner to facilitate testing
-      allow update: if isAuthenticated() && (isAdmin() || isOwner(userId));
+      // Demo profile docs use fixed IDs; merge:true becomes an update after the first seed.
+      // Allow the same callers as create so anonymous demo sessions do not fail on reload.
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        isOwner(userId) ||
+        userId in ['demo-worker-id', 'demo-client-id']
+      );
       allow delete: if isAdmin();
     }
 

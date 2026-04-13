@@ -188,23 +188,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             handleFirestoreError(e, OperationType.LIST, 'routes');
           }
 
-          // 4. Seed permanent demo users
+          // 4. Seed permanent demo users (create only: merge would be an update after first run,
+          // which Firestore rules often restrict to doc owner unless demo IDs are allowed.)
           try {
-            await setDoc(doc(db, 'users', 'demo-worker-id'), {
+            const seedDemoUser = async (
+              demoUid: string,
+              payload: Record<string, unknown>
+            ) => {
+              const ref = doc(db, 'users', demoUid);
+              const snap = await getDoc(ref);
+              if (!snap.exists) {
+                await setDoc(ref, payload);
+              }
+            };
+            await seedDemoUser('demo-worker-id', {
               name: 'Técnico de Pruebas',
               email: 'worker@demo.com',
               role: 'worker',
               uid: 'demo-worker-id',
               createdAt: new Date().toISOString()
-            }, { merge: true });
-
-            await setDoc(doc(db, 'users', 'demo-client-id'), {
+            });
+            await seedDemoUser('demo-client-id', {
               name: 'Cliente de Pruebas',
               email: 'client@demo.com',
               role: 'client',
               uid: 'demo-client-id',
               createdAt: new Date().toISOString()
-            }, { merge: true });
+            });
           } catch (e) {
             handleFirestoreError(e, OperationType.WRITE, 'users/demo-worker-id');
           }
