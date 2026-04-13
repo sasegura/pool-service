@@ -168,19 +168,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             handleFirestoreError(e, OperationType.LIST, 'pools');
           }
 
-          // 3. Seed a template route if none exist
+          // 3. Seed a dated route if none exist
           try {
             const routesSnap = await getDocs(collection(db, 'routes'));
             if (routesSnap.empty) {
               const poolsForRoute = await getDocs(collection(db, 'pools'));
               const poolIds = poolsForRoute.docs.map(d => d.id);
               if (poolIds.length > 0) {
+                const t = new Date();
+                t.setDate(t.getDate() + 1);
+                const dateStr = t.toISOString().slice(0, 10);
                 await addDoc(collection(db, 'routes'), {
-                  routeName: 'Ruta de Prueba (Mañana)',
+                  routeName: 'Ruta de prueba (mañana)',
                   poolIds: poolIds,
-                  date: '', // Template
-                  workerId: '', // Unassigned
-                  status: 'pending'
+                  date: dateStr,
+                  workerId: '',
+                  status: 'pending',
+                  recurrence: 'none',
+                  createdAt: new Date().toISOString(),
                 });
               }
             }

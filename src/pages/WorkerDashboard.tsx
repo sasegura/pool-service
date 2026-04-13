@@ -40,6 +40,7 @@ interface Route {
   lastPoolId?: string;
   lastStatus?: 'ok' | 'issue';
   templateId?: string;
+  planningPriority?: number;
 }
 
 function WorkerRouteMap({
@@ -172,8 +173,11 @@ export default function WorkerDashboard() {
       const allRoutes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Route));
       setAllMyRoutes(allRoutes.filter(r => r.workerId === userUid));
       
-      // 1. Find a specific daily instance for today
-      const dailyInstance = allRoutes.find(r => r.workerId === userUid && r.date === today);
+      // 1. Find a specific daily instance for today (prioridad de planificación si hay varias)
+      const dailyInstances = allRoutes.filter(r => r.workerId === userUid && r.date === today);
+      const dailyInstance = dailyInstances.sort(
+        (a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0)
+      )[0];
       
       if (dailyInstance) {
         setTodayRoute(dailyInstance);
