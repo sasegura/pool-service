@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { ArrowLeft, Droplets, Loader2, SlidersHorizontal } from 'lucide-react';
-import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { deepRemoveUndefined } from '../features/pools/domain/poolDraft';
+import {
+  fetchPoolById,
+  fetchRecentVisitDocs,
+  savePoolVisitWithPoolUpdate,
+} from '../features/visits/repositories/poolVisitRepositoryFirestore';
 import { Button, Card } from '../components/ui/Common';
 import { DEFAULT_MAINTENANCE_INTERVAL_DAYS } from '../constants/chemicalReference';
 import { estimateVolumeM3, computeAvgDepthM } from '../lib/poolVolume';
@@ -24,17 +29,6 @@ const emptyVisual: PoolVisualObservations = {
 };
 
 type ChemistryInputDraft = Partial<Record<keyof PoolChemistryInput, string>>;
-
-function deepRemoveUndefined(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map((item) => deepRemoveUndefined(item));
-  if (value && typeof value === 'object') {
-    const cleanedEntries = Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .map(([k, v]) => [k, deepRemoveUndefined(v)] as const);
-    return Object.fromEntries(cleanedEntries);
-  }
-  return value;
-}
 
 export default function PoolVisitPage() {
   const { poolId } = useParams<{ poolId: string }>();
@@ -62,22 +56,16 @@ export default function PoolVisitPage() {
     (async () => {
       setLoadingPool(true);
       try {
-        const snap = await getDoc(doc(db, 'pools', poolId));
+        const poolData = await fetchPoolById(poolId);
         if (cancelled) return;
-        if (!snap.exists()) {
+        if (!poolData) {
           setPool(null);
           return;
         }
-        const poolData = { id: snap.id, ...snap.data() } as PoolRecord;
         setPool(poolData);
 
-        // Restore previously saved measurements to avoid retyping
-        const visitsSnap = await getDocs(
-          query(collection(db, 'pools', poolId, 'visits'), orderBy('visitedAt', 'desc'), limit(5))
-        );
+        const recentVisits = await fetchRecentVisitDocs(poolId, 5);
         if (cancelled) return;
-
-        const recentVisits = visitsSnap.docs.map((d) => d.data() as any);
         const bestMatch = recentVisits.find((v) => {
           const sameTech = !!user?.uid && v.technicianId === user.uid;
           const sameRoute = routeId ? v.routeId === routeId : true;
@@ -85,7 +73,7 @@ export default function PoolVisitPage() {
         });
 
         const fallbackChem = (poolData.lastMeasurement || {}) as PoolChemistryInput;
-        const restoredChem = (bestMatch?.chemistry || fallbackChem) as PoolChemistryInput;
+        const restoredChem = ((bestMatch?.chemistry as PoolChemistryInput | undefined) || fallbackChem) as PoolChemistryInput;
         if (Object.keys(restoredChem).length > 0) {
           setChemistry((prev) => ({ ...restoredChem, ...prev }));
           setChemistryDraft((prev) => ({
@@ -99,10 +87,10 @@ export default function PoolVisitPage() {
         if (bestMatch?.visual) {
           setVisual((prev) => ({ ...prev, ...(bestMatch.visual as PoolVisualObservations) }));
         }
-        if (bestMatch?.technicianNotes) {
+        if (bestMatch?.technicianNotes != null && typeof bestMatch.technicianNotes === 'string') {
           setNotes(bestMatch.technicianNotes);
         }
-        if (bestMatch?.appliedTreatment) {
+        if (bestMatch?.appliedTreatment != null && typeof bestMatch.appliedTreatment === 'string') {
           setAppliedTreatment(bestMatch.appliedTreatment);
         }
       } catch {
@@ -203,22 +191,20 @@ export default function PoolVisitPage() {
         createdAt: serverTimestamp(),
       }) as Record<string, unknown>;
 
-      const visitRef = await addDoc(collection(db, 'pools', poolId, 'visits'), visitPayload);
-
       const nextMaint = new Date(visitedAt);
       nextMaint.setDate(nextMaint.getDate() + DEFAULT_MAINTENANCE_INTERVAL_DAYS);
 
-      const poolUpdatePayload = deepRemoveUndefined({
-        healthStatus: health,
-        lastVisitAt: visitedAt,
-        lastVisitTechnicianName: user.displayName || user.email || '',
-        lastMeasurement: chemistryPayload,
-        lastVisitId: visitRef.id,
-        nextRecommendedMaintenance: nextMaint.toISOString(),
-        updatedAt: serverTimestamp(),
-      }) as Record<string, unknown>;
-
-      await updateDoc(doc(db, 'pools', poolId), poolUpdatePayload);
+      await savePoolVisitWithPoolUpdate(poolId, visitPayload, (visitDocId) =>
+        deepRemoveUndefined({
+          healthStatus: health,
+          lastVisitAt: visitedAt,
+          lastVisitTechnicianName: user.displayName || user.email || '',
+          lastMeasurement: chemistryPayload,
+          lastVisitId: visitDocId,
+          nextRecommendedMaintenance: nextMaint.toISOString(),
+          updatedAt: serverTimestamp(),
+        }) as Record<string, unknown>
+      );
 
       toast.success(t('poolVisit.toastSaved'));
       const query = new URLSearchParams();

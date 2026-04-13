@@ -12,8 +12,14 @@ import { es, enUS } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
+import { getGoogleMapsApiKey } from '../config/env';
+import {
+  poolDocToRecord,
+  subscribeAllPools,
+  subscribeAllRoutes,
+} from '../features/worker-dashboard/repositories/workerRoutesRepositoryFirestore';
 
-const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
 import type { PoolRecord } from '../types/pool';
@@ -40,8 +46,8 @@ interface Route {
   planningPriority?: number;
 }
 
-const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T> =>
-  Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
+const removeUndefinedFields = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+  Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as Partial<T>;
 
 function WorkerRouteMap({
   poolIds,
@@ -189,7 +195,7 @@ export default function WorkerDashboard() {
     const today = format(new Date(), 'yyyy-MM-dd');
     
     // Listen for ALL routes to handle templates, weekly plans and daily instances
-    const unsubRoutes = onSnapshot(collection(db, 'routes'), async (snapshot) => {
+    const unsubRoutes = subscribeAllRoutes(async (snapshot) => {
       const allRoutes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Route));
       setAllMyRoutes(allRoutes.filter(r => isMyWorkerRoute(r.workerId)));
       
@@ -234,10 +240,10 @@ export default function WorkerDashboard() {
     });
 
     // Listen for all pools to have them ready
-    const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
+    const unsubPools = subscribeAllPools((snap) => {
       const poolMap: Record<string, PoolRecord> = {};
       snap.docs.forEach(d => {
-        poolMap[d.id] = { id: d.id, ...d.data() } as PoolRecord;
+        poolMap[d.id] = poolDocToRecord(d.id, d.data());
       });
       setPools(poolMap);
     }, (error) => {

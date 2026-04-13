@@ -1,80 +1,18 @@
-import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { Button, Card } from '../components/ui/Common';
+import React, { useState } from 'react';
+import { Card } from '../components/ui/Common';
 import { AlertCircle, Calendar, MapPin, User, Clock, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
-
-interface Incident {
-  id: string;
-  poolId: string;
-  workerId: string;
-  notes: string;
-  status: string;
-  date: string;
-  arrivalTime?: any;
-}
-
-interface Pool {
-  id: string;
-  name: string;
-}
-
-interface Worker {
-  id: string;
-  name: string;
-}
-
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { useIncidentsPageData } from '../features/incidents/hooks/useIncidentsPageData';
 
 export default function IncidentsPage() {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const { user, loading: authLoading } = useAuth();
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [pools, setPools] = useState<Record<string, string>>({});
-  const [workers, setWorkers] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
   const [filterDate, setFilterDate] = useState<string>('');
-
-  useEffect(() => {
-    if (authLoading || !user) return;
-
-    const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
-      const pMap: Record<string, string> = {};
-      snap.docs.forEach(d => pMap[d.id] = d.data().name);
-      setPools(pMap);
-    });
-
-    const unsubWorkers = onSnapshot(collection(db, 'users'), (snap) => {
-      const wMap: Record<string, string> = {};
-      snap.docs.forEach(d => wMap[d.id] = d.data().name);
-      setWorkers(wMap);
-    });
-
-    let q = query(collection(db, 'logs'), orderBy('date', 'desc'));
-    
-    if (filterDate) {
-      q = query(collection(db, 'logs'), where('date', '==', filterDate), orderBy('date', 'desc'));
-    }
-
-    const unsubLogs = onSnapshot(q, (snap) => {
-      const allLogs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Incident));
-      setIncidents(allLogs.filter(log => log.status === 'issue'));
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching incidents:", error);
-      setLoading(false);
-    });
-
-    return () => {
-      unsubPools();
-      unsubWorkers();
-      unsubLogs();
-    };
-  }, [filterDate]);
+  const { incidents, pools, workers, loading } = useIncidentsPageData(!authLoading && !!user, filterDate);
 
   return (
     <div className="space-y-6">

@@ -1,14 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  collection,
-  onSnapshot,
-  addDoc,
-  doc,
-  deleteDoc,
-  query,
-  updateDoc,
-  writeBatch,
-} from 'firebase/firestore';
+import { collection, addDoc, doc, deleteDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
@@ -37,7 +28,6 @@ import {
   getDay,
   isWithinInterval,
   parseISO,
-  setDay,
   startOfWeek,
 } from 'date-fns';
 import type { Locale } from 'date-fns';
@@ -46,134 +36,18 @@ import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { optimizeRoute } from '../services/geminiService';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { getGoogleMapsApiKey } from '../config/env';
+import { MIAMI_CENTER } from '../features/routes/constants';
+import { DeferredMapMount } from '../features/routes/components/DeferredMapMount';
+import { resolveRouteNameForSave } from '../features/routes/domain/routeNaming';
+import { defaultNewRouteForm, isDatedRoute, isLegacyUndated } from '../features/routes/domain/routePredicates';
+import { useRoutesDirectory } from '../features/routes/hooks/useRoutesDirectory';
+import type { RouteDocument as Route, RoutesPool as Pool, RoutesWorker as Worker } from '../features/routes/types';
 
-const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
-const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 /** Ocultar navegación Semana − / + junto al selector de fecha (reactivar cuando haga falta) */
 const SHOW_CALENDAR_WEEK_STEPPER = false;
-
-/** Nombre obligatorio: si viene vacío, se usa el día de la semana en inglés según la fecha de la ruta. */
-function resolveRouteNameForSave(
-  trimmedName: string,
-  isScheduled: boolean,
-  recurrence: Route['recurrence'] | undefined,
-  daysOfWeek: number[] | undefined,
-  dateStr: string | undefined,
-  startDateStr: string | undefined,
-  dateLocale: Locale
-): string {
-  if (trimmedName) return trimmedName;
-  if (isScheduled && recurrence === 'weekly' && daysOfWeek && daysOfWeek.length > 0) {
-    const d = setDay(new Date(), daysOfWeek[0], { weekStartsOn: 0 });
-    return format(d, 'EEEE', { locale: dateLocale });
-  }
-  const anchor = isScheduled ? startDateStr : dateStr;
-  if (anchor) {
-    const d = parseISO(anchor);
-    if (!Number.isNaN(d.getTime())) {
-      return format(d, 'EEEE', { locale: dateLocale });
-    }
-  }
-  return format(new Date(), 'EEEE', { locale: dateLocale });
-}
-
-/**
- * Montar <Map> tras varios frames y cuando cambia `deferKey` evita que la API use
- * IntersectionObserver sobre un nodo que aún no es un Element válido.
- */
-function DeferredMapMount({
-  children,
-  deferKey,
-}: {
-  children: React.ReactNode;
-  /** Al cambiar (p. ej. ruta seleccionada o modo mapa), se vuelve a aplazar el montaje. */
-  deferKey?: string | number | null;
-}) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setReady(false);
-    let cancelled = false;
-    let r1 = 0;
-    let r2 = 0;
-    let r3 = 0;
-    r1 = requestAnimationFrame(() => {
-      r2 = requestAnimationFrame(() => {
-        r3 = requestAnimationFrame(() => {
-          if (!cancelled) setReady(true);
-        });
-      });
-    });
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(r1);
-      cancelAnimationFrame(r2);
-      cancelAnimationFrame(r3);
-    };
-  }, [deferKey]);
-  if (!ready) {
-    return <div className="h-full min-h-[240px] w-full bg-slate-100" aria-hidden />;
-  }
-  return <>{children}</>;
-}
-
-interface Pool {
-  id: string;
-  name: string;
-  address: string;
-  coordinates?: { lat: number; lng: number };
-}
-
-interface Worker {
-  id: string;
-  name: string;
-  role: string;
-}
-
-interface Route {
-  id: string;
-  workerId?: string;
-  date?: string;
-  startDate?: string;
-  endDate?: string;
-  recurrence?: 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly';
-  daysOfWeek?: number[];
-  routeName?: string;
-  poolIds: string[];
-  status: 'pending' | 'in-progress' | 'completed';
-  order?: number;
-  assignedDay?: number;
-  createdAt?: string;
-  /** Id de la ruta de la semana modelo usada al generar esta instancia (deduplicado) */
-  templateId?: string;
-  /** Orden entre rutas del mismo día (1 = primera en reparto a técnicos) */
-  planningPriority?: number;
-}
-
-function defaultNewRouteForm() {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  return {
-    workerId: '',
-    date: today,
-    startDate: today,
-    endDate: '' as string,
-    hasEndDate: false,
-    recurrence: 'weekly' as 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly',
-    daysOfWeek: [] as number[],
-    poolIds: [] as string[],
-    routeName: '',
-    noWorker: false,
-    isScheduled: true,
-  };
-}
-
-function isDatedRoute(r: Route) {
-  return !!r.date;
-}
-
-function isLegacyUndated(r: Route) {
-  return !r.date && !r.startDate;
-}
 
 export default function RoutesPage() {
   const { t, i18n } = useTranslation();
@@ -181,9 +55,7 @@ export default function RoutesPage() {
   const weekdayInitials = t('routesPage.weekdayInitials', { returnObjects: true }) as string[];
   const calendarWeekdayHeaders = t('routesPage.calendarWeekdays', { returnObjects: true }) as string[];
   const { user, loading: authLoading } = useAuth();
-  const [pools, setPools] = useState<Pool[]>([]);
-  const [workers, setWorkers] = useState<Worker[]>([]);
-  const [routes, setRoutes] = useState<Route[]>([]);
+  const { pools, workers, routes } = useRoutesDirectory(!authLoading && !!user);
   const [showRouteForm, setShowRouteForm] = useState(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
@@ -354,28 +226,6 @@ export default function RoutesPage() {
     }
     return weeks;
   }, [planFromDate, planHorizonDays]);
-
-  useEffect(() => {
-    if (authLoading || !user) return;
-
-    const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
-      setPools(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Pool)));
-    });
-    const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
-      const users = snap.docs.map((d) => ({ id: d.id, ...d.data() } as any));
-      const filteredWorkers = users.filter((u: any) => u.role === 'worker' || u.isWorker);
-      setWorkers(filteredWorkers);
-    });
-    const unsubRoutes = onSnapshot(collection(db, 'routes'), (snap) => {
-      setRoutes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Route)));
-    });
-
-    return () => {
-      unsubPools();
-      unsubUsers();
-      unsubRoutes();
-    };
-  }, [user, authLoading]);
 
   const handleAddRoute = async (e: React.FormEvent) => {
     e.preventDefault();

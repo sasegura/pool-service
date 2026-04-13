@@ -1,44 +1,27 @@
-import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, query, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import React, { useState } from 'react';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
 import { Plus, Users, Trash2, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-
-interface Worker {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-}
-
 import { useAuth } from '../contexts/AuthContext';
+import { useTeamUsers } from '../features/team/hooks/useTeamUsers';
+import type { TeamUser } from '../features/team/types';
 
 export default function TeamPage() {
   const { t } = useTranslation();
   const { user, loading: authLoading } = useAuth();
-  const [allUsers, setAllUsers] = useState<Worker[]>([]);
+  const { allUsers, repository } = useTeamUsers(!authLoading && !!user);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [newWorker, setNewWorker] = useState({ name: '', email: '', role: 'worker' });
-
-  useEffect(() => {
-    if (authLoading || !user) return;
-
-    const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
-      setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Worker)));
-    });
-    return () => unsubUsers();
-  }, []);
 
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       if (editingUserId) {
         const email = newWorker.email.trim().toLowerCase();
-        await updateDoc(doc(db, 'users', editingUserId), {
+        await repository.updateUser(editingUserId, {
           name: newWorker.name.trim(),
           email,
           role: newWorker.role,
@@ -52,47 +35,47 @@ export default function TeamPage() {
           return;
         }
 
-        const ref = doc(collection(db, 'users'));
-        await setDoc(ref, {
+        await repository.createPreregisteredUser({
           name: newWorker.name.trim(),
           email,
           role: newWorker.role,
-          /** Mismo valor que el id del documento; las piscinas guardan `clientId` = id de `users`. */
-          uid: ref.id,
-          createdAt: new Date().toISOString(),
         });
         toast.success(t('team.toastPreregistered'));
       }
       setNewWorker({ name: '', email: '', role: 'worker' });
       setShowWorkerForm(false);
       setEditingUserId(null);
-    } catch (e) {
+    } catch {
       toast.error(t('team.toastSaveError'));
     }
   };
 
-  const handleEdit = (user: Worker) => {
-    setNewWorker({ name: user.name, email: user.email, role: user.role });
-    setEditingUserId(user.id);
+  const handleEdit = (member: TeamUser) => {
+    setNewWorker({ name: member.name, email: member.email, role: member.role });
+    setEditingUserId(member.id);
     setShowWorkerForm(true);
   };
 
-  const toggleRole = async (user: Worker) => {
+  const toggleRole = async (member: TeamUser) => {
     const roles: ('admin' | 'worker' | 'client')[] = ['admin', 'worker', 'client'];
-    const currentIndex = roles.indexOf(user.role as any);
+    const currentIndex = roles.indexOf(member.role as 'admin' | 'worker' | 'client');
     const nextRole = roles[(currentIndex + 1) % roles.length];
-    
+
     try {
-      await updateDoc(doc(db, 'users', user.id), { role: nextRole });
+      await repository.updateUser(member.id, {
+        name: member.name,
+        email: member.email,
+        role: nextRole,
+      });
       toast.success(t('team.roleUpdated', { role: t(`common.${nextRole}`) }));
-    } catch (e) {
+    } catch {
       toast.error(t('team.toastRoleError'));
     }
   };
 
   const deleteUser = async (id: string) => {
     if (confirm(t('team.confirmDelete'))) {
-      await deleteDoc(doc(db, 'users', id));
+      await repository.deleteUser(id);
       toast.info(t('team.toastDeleted'));
     }
   };
@@ -168,26 +151,26 @@ export default function TeamPage() {
       )}
 
       <div className="grid gap-3">
-        {allUsers.map(user => (
-          <Card key={user.id} className="p-4 flex items-center justify-between hover:border-blue-200 transition-colors">
+        {allUsers.map(member => (
+          <Card key={member.id} className="p-4 flex items-center justify-between hover:border-blue-200 transition-colors">
             <div className="flex items-center gap-4">
               <div className={cn(
                 "p-3 rounded-full",
-                user.role === 'admin' ? "bg-purple-100 text-purple-600" : 
-                user.role === 'client' ? "bg-amber-100 text-amber-600" : "bg-blue-100 text-blue-600"
+                member.role === 'admin' ? "bg-purple-100 text-purple-600" : 
+                member.role === 'client' ? "bg-amber-100 text-amber-600" : "bg-blue-100 text-blue-600"
               )}>
                 <Users className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="font-bold text-slate-900">{user.name}</h4>
-                <p className="text-xs text-slate-500">{user.email}</p>
-                <p className="text-[9px] text-slate-400 font-mono mt-0.5">ID: {user.id}</p>
+                <h4 className="font-bold text-slate-900">{member.name}</h4>
+                <p className="text-xs text-slate-500">{member.email}</p>
+                <p className="text-[9px] text-slate-400 font-mono mt-0.5">ID: {member.id}</p>
                 <span className={cn(
                   "inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase",
-                  user.role === 'admin' ? "bg-purple-50 text-purple-700" : 
-                  user.role === 'client' ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
+                  member.role === 'admin' ? "bg-purple-50 text-purple-700" : 
+                  member.role === 'client' ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
                 )}>
-                  {t(`common.${user.role}`)}
+                  {t(`common.${member.role}`)}
                 </span>
               </div>
             </div>
@@ -196,7 +179,7 @@ export default function TeamPage() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => handleEdit(user)}
+                onClick={() => handleEdit(member)}
                 title={t('team.editUser')}
               >
                 <Edit2 className="w-4 h-4" />
@@ -204,7 +187,7 @@ export default function TeamPage() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => toggleRole(user)}
+                onClick={() => toggleRole(member)}
                 title={t('team.toggleRole')}
               >
                 <Users className="w-4 h-4" />
@@ -212,7 +195,7 @@ export default function TeamPage() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => deleteUser(user.id)}
+                onClick={() => deleteUser(member.id)}
                 className="text-red-500 hover:bg-red-50"
               >
                 <Trash2 className="w-4 h-4" />

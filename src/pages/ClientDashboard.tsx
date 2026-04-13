@@ -1,6 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Card } from '../components/ui/Common';
 import { Waves, Calendar, CheckCircle2, AlertTriangle, Clock, MapPin } from 'lucide-react';
@@ -8,130 +6,13 @@ import { format } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
-
-interface Pool {
-  id: string;
-  name: string;
-  address: string;
-  clientId?: string;
-}
-
-interface Log {
-  id: string;
-  poolId: string;
-  workerId: string;
-  arrivalTime: any;
-  status: 'ok' | 'issue';
-  notes?: string;
-  date: string;
-  notifyClient?: boolean;
-}
-
-const FIRESTORE_IN_MAX = 30;
+import { useClientDashboard } from '../features/client-dashboard/hooks/useClientDashboard';
 
 export default function ClientDashboard() {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const { user } = useAuth();
-  const [pools, setPools] = useState<Pool[]>([]);
-  const [logs, setLogs] = useState<Log[]>([]);
-  const [workers, setWorkers] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  /** IDs de documento `users` que representan a este cliente (Auth UID + perfiles con el mismo email). */
-  const [poolOwnerDocIds, setPoolOwnerDocIds] = useState<string[]>([]);
-
-  const poolOwnerKey = useMemo(() => poolOwnerDocIds.slice().sort().join(','), [poolOwnerDocIds]);
-
-  useEffect(() => {
-    if (!user?.uid) {
-      setPoolOwnerDocIds([]);
-      return;
-    }
-    const email = (user.email || '').trim().toLowerCase();
-    setPoolOwnerDocIds([user.uid]);
-    const unsub = onSnapshot(collection(db, 'users'), (snap) => {
-      const ids = new Set<string>([user.uid]);
-      if (email) {
-        snap.docs.forEach((d) => {
-          const em = (d.data().email as string | undefined)?.trim().toLowerCase();
-          if (em && em === email) ids.add(d.id);
-        });
-      }
-      setPoolOwnerDocIds(Array.from(ids));
-    });
-    return () => unsub();
-  }, [user?.uid, user?.email]);
-
-  useEffect(() => {
-    if (!user?.uid || poolOwnerDocIds.length === 0) {
-      setPools([]);
-      setLogs([]);
-      setLoading(false);
-      return;
-    }
-
-    let unsubLogs: (() => void) | undefined;
-
-    const unsubWorkers = onSnapshot(collection(db, 'users'), (snap) => {
-      const wMap: Record<string, string> = {};
-      snap.docs.forEach((d) => {
-        wMap[d.id] = d.data().name as string;
-      });
-      setWorkers(wMap);
-    });
-
-    const inIds = poolOwnerDocIds.slice(0, FIRESTORE_IN_MAX);
-    const qPools =
-      inIds.length === 1
-        ? query(collection(db, 'pools'), where('clientId', '==', inIds[0]))
-        : query(collection(db, 'pools'), where('clientId', 'in', inIds));
-
-    const unsubPools = onSnapshot(
-      qPools,
-      (snap) => {
-        unsubLogs?.();
-        unsubLogs = undefined;
-
-        const poolsData = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Pool));
-        setPools(poolsData);
-
-        if (poolsData.length > 0) {
-          const poolIds = poolsData.map((p) => p.id);
-          const qLogs = query(
-            collection(db, 'logs'),
-            where('poolId', 'in', poolIds),
-            orderBy('date', 'desc')
-          );
-
-          unsubLogs = onSnapshot(qLogs, (logSnap) => {
-            const logsData = logSnap.docs
-              .map((d) => ({ id: d.id, ...d.data() } as Log))
-              .filter((log) => log.notifyClient !== false);
-
-            const sortedLogs = logsData.sort((a, b) => {
-              const timeA = a.arrivalTime?.toMillis?.() || 0;
-              const timeB = b.arrivalTime?.toMillis?.() || 0;
-              return timeB - timeA;
-            });
-            setLogs(sortedLogs);
-            setLoading(false);
-          });
-        } else {
-          setLogs([]);
-          setLoading(false);
-        }
-      },
-      () => {
-        setLoading(false);
-      }
-    );
-
-    return () => {
-      unsubWorkers();
-      unsubPools();
-      unsubLogs?.();
-    };
-  }, [user?.uid, poolOwnerKey]);
+  const { pools, logs, workers, loading } = useClientDashboard(user?.uid, user?.email);
 
   if (loading) return <div className="p-8 text-center">{t('client.loadingHistory')}</div>;
 

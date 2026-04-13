@@ -1,10 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { getGeminiApiKey } from "../config/env";
 
 let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = getGeminiApiKey();
     if (!apiKey || apiKey === 'undefined') {
       throw new Error("GEMINI_API_KEY is not set. Please configure it in the Secrets panel.");
     }
