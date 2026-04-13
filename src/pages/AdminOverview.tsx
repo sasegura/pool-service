@@ -9,6 +9,8 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -43,8 +45,34 @@ interface Pool {
   name: string;
 }
 
-import { useAuth } from '../contexts/AuthContext';
-import { useTranslation } from 'react-i18next';
+function AdminOverviewTrackingMap({ workers }: { workers: User[] }) {
+  const [mapReadyForMarkers, setMapReadyForMarkers] = useState(false);
+  return (
+    <Map
+      defaultCenter={MIAMI_CENTER}
+      defaultZoom={11}
+      mapId="admin_tracking_map"
+      onTilesLoaded={() => setMapReadyForMarkers(true)}
+    >
+      {mapReadyForMarkers
+        ? workers.map((worker) => (
+            <AdvancedMarker key={worker.id} position={worker.lastLocation!}>
+              <Pin
+                background={'#2563eb'}
+                glyphColor={'#fff'}
+                borderColor={'#000'}
+              >
+                <Users className="w-3 h-3" />
+              </Pin>
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white px-2 py-1 rounded shadow-md border border-slate-200 text-[10px] font-bold whitespace-nowrap">
+                {worker.name}
+              </div>
+            </AdvancedMarker>
+          ))
+        : null}
+    </Map>
+  );
+}
 
 export default function AdminOverview() {
   const navigate = useNavigate();
@@ -349,29 +377,7 @@ export default function AdminOverview() {
             <div className="h-[400px] relative">
               {GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY' ? (
                 <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
-                  <Map
-                    defaultCenter={MIAMI_CENTER}
-                    defaultZoom={11}
-                    mapId="admin_tracking_map"
-                  >
-                    {liveWorkers.map((worker) => (
-                      <AdvancedMarker
-                        key={worker.id}
-                        position={worker.lastLocation!}
-                      >
-                        <Pin 
-                          background={'#2563eb'} 
-                          glyphColor={'#fff'} 
-                          borderColor={'#000'}
-                        >
-                          <Users className="w-3 h-3" />
-                        </Pin>
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white px-2 py-1 rounded shadow-md border border-slate-200 text-[10px] font-bold whitespace-nowrap">
-                          {worker.name}
-                        </div>
-                      </AdvancedMarker>
-                    ))}
-                  </Map>
+                  <AdminOverviewTrackingMap workers={liveWorkers} />
                 </APIProvider>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-slate-400 text-xs text-center p-8">
