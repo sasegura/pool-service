@@ -79,17 +79,38 @@ function resolveRouteNameForSave(
 }
 
 /**
- * Montar <Map> en el siguiente frame evita que la API use IntersectionObserver sobre un
- * contenedor aún no válido (error "parameter 1 is not of type 'Element'").
+ * Montar <Map> tras varios frames y cuando cambia `deferKey` evita que la API use
+ * IntersectionObserver sobre un nodo que aún no es un Element válido.
  */
-function DeferredMapMount({ children }: { children: React.ReactNode }) {
+function DeferredMapMount({
+  children,
+  deferKey,
+}: {
+  children: React.ReactNode;
+  /** Al cambiar (p. ej. ruta seleccionada o modo mapa), se vuelve a aplazar el montaje. */
+  deferKey?: string | number | null;
+}) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => setReady(true));
+    setReady(false);
+    let cancelled = false;
+    let r1 = 0;
+    let r2 = 0;
+    let r3 = 0;
+    r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => {
+        r3 = requestAnimationFrame(() => {
+          if (!cancelled) setReady(true);
+        });
+      });
     });
-    return () => cancelAnimationFrame(id);
-  }, []);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+      cancelAnimationFrame(r3);
+    };
+  }, [deferKey]);
   if (!ready) {
     return <div className="h-full min-h-[240px] w-full bg-slate-100" aria-hidden />;
   }
@@ -177,6 +198,7 @@ export default function RoutesPage() {
   /** fecha -> ids de rutas origen a instanciar ese día (orden = planningPriority) */
   const [placementsByDate, setPlacementsByDate] = useState<Record<string, string[]>>({});
   const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [routeFormBusy, setRouteFormBusy] = useState(false);
   /** Semana modelo: cualquier fecha dentro de la semana (lun–dom) de la que se copian rutas por día de la semana */
   const [planSourceWeekAnchor, setPlanSourceWeekAnchor] = useState(() =>
     format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
@@ -357,6 +379,7 @@ export default function RoutesPage() {
 
   const handleAddRoute = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (routeFormBusy) return;
     if (newRoute.poolIds.length === 0) {
       toast.error(t('routesPage.errSelectPool'));
       return;
@@ -373,6 +396,7 @@ export default function RoutesPage() {
       toast.error(t('routesPage.errWeekday'));
       return;
     }
+    setRouteFormBusy(true);
     try {
       const trimmedName = (newRoute.routeName || '').trim();
       const routeName = resolveRouteNameForSave(
@@ -422,6 +446,8 @@ export default function RoutesPage() {
       setEditingRouteId(null);
     } catch {
       toast.error(t('routesPage.toastSaveError'));
+    } finally {
+      setRouteFormBusy(false);
     }
   };
 
@@ -430,6 +456,7 @@ export default function RoutesPage() {
       toast.error(t('routesPage.errWeekday'));
       return;
     }
+    setRouteFormBusy(false);
     setShowRouteForm(false);
     setEditingRouteId(null);
   }, [weeklyRequiresAtLeastOneDay, t]);
@@ -438,6 +465,7 @@ export default function RoutesPage() {
     if (!showRouteForm) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        setRouteFormBusy(false);
         setShowRouteForm(false);
         setEditingRouteId(null);
       }
@@ -448,10 +476,12 @@ export default function RoutesPage() {
 
   const handleEdit = (route: Route) => {
     const today = format(new Date(), 'yyyy-MM-dd');
+    /** Ruta puntual: tiene día de servicio y no es definición por rango (evita guardar como recurrente y borrar `date`). */
+    const isOneOffDated = Boolean(route.date) && !route.startDate;
     setNewRoute({
       workerId: route.workerId || '',
       date: route.date || today,
-      startDate: route.startDate || today,
+      startDate: route.startDate || route.date || today,
       endDate: route.endDate || '',
       hasEndDate: !!route.endDate,
       recurrence: route.recurrence || 'none',
@@ -459,7 +489,7 @@ export default function RoutesPage() {
       poolIds: route.poolIds,
       routeName: route.routeName || '',
       noWorker: !route.workerId,
-      isScheduled: true,
+      isScheduled: !isOneOffDated,
     });
     setEditingRouteId(route.id);
     setShowRouteForm(true);
@@ -705,8 +735,17 @@ export default function RoutesPage() {
             p++;
             continue;
           }
+          /** No crear instancia el mismo día que la ruta origen (origen ya es la ruta de ese día). */
+          if ((src.date || '') === dateStr) {
+            skipped++;
+            p++;
+            continue;
+          }
           const key = `${dateStr}|${srcId}`;
-          if (keys.has(key)) {
+          const duplicateInstance = routes.some(
+            (r) => r.id !== srcId && r.date === dateStr && r.templateId === srcId
+          );
+          if (keys.has(key) || duplicateInstance) {
             skipped++;
             p++;
             continue;
@@ -835,6 +874,20 @@ export default function RoutesPage() {
                 {editingRouteId ? t('routesPage.editRoute') : t('routesPage.newRouteForm')}
               </h3>
 
+              {!newRoute.isScheduled && (
+                <div className="rounded-xl border border-blue-100 bg-white p-3">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                    {t('routesPage.serviceDateField')}
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full max-w-xs rounded-lg border-slate-200 p-2 text-sm"
+                    value={newRoute.date}
+                    onChange={(e) => setNewRoute({ ...newRoute, date: e.target.value })}
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
                   {t('routesPage.nameOptional')}
@@ -848,7 +901,8 @@ export default function RoutesPage() {
                 />
               </div>
 
-              <div className="space-y-4 p-4 bg-white rounded-xl border border-blue-100">
+              {newRoute.isScheduled && (
+                <div className="space-y-4 p-4 bg-white rounded-xl border border-blue-100">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -950,8 +1004,8 @@ export default function RoutesPage() {
                     </div>
                   )}
                 </div>
+              )}
 
-              {newRoute.isScheduled && (
                 <div className="space-y-2 mb-4">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-bold text-slate-500 uppercase">
@@ -982,7 +1036,6 @@ export default function RoutesPage() {
                     ))}
                   </select>
                 </div>
-              )}
 
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-500 uppercase">
@@ -1123,7 +1176,7 @@ export default function RoutesPage() {
                 </div>
               ) : (
                 <div className="h-64 rounded-xl overflow-hidden border border-slate-200 relative">
-                  <DeferredMapMount>
+                  <DeferredMapMount deferKey={routeViewMode}>
                     <Map defaultCenter={MIAMI_CENTER} defaultZoom={11}>
                       {pools.map((p) => {
                         const otherHint = getPoolAssignmentHint(p.id);
@@ -1151,7 +1204,7 @@ export default function RoutesPage() {
               )}
 
               <div className="flex gap-2">
-                <Button type="submit" className="flex-1">
+                <Button type="submit" className="flex-1" disabled={routeFormBusy} isLoading={routeFormBusy}>
                   {editingRouteId ? t('routesPage.update') : t('routesPage.save')}
                 </Button>
                 <Button type="button" variant="outline" onClick={tryCloseRouteForm}>
@@ -1482,10 +1535,9 @@ export default function RoutesPage() {
                 </Button>
               ) : null}
             </div>
-            <div className="h-80 rounded-xl overflow-hidden border border-slate-200">
-              <DeferredMapMount>
+            <div className="h-80 min-h-[320px] w-full rounded-xl overflow-hidden border border-slate-200 relative">
+              <DeferredMapMount deferKey={selectedRouteId ?? 'all-pools'}>
                 <Map
-                  key={selectedRouteId ?? 'all-pools'}
                   defaultCenter={mapViewCenter}
                   defaultZoom={selectedRouteId ? 12 : 11}
                 >

@@ -1,13 +1,21 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, onSnapshot, addDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  onSnapshot,
+  addDoc,
+  doc,
+  deleteDoc,
+  deleteField,
+  updateDoc,
+} from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card } from '../components/ui/Common';
 import { Plus, Waves, MapPin, Trash2, AlertCircle, Edit2, Search, CheckCircle, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { APIProvider, Map, Marker, useMapsLibrary } from '@vis.gl/react-google-maps';
 import type { PoolRecord, PoolShape, PoolSystemType, PoolUsage } from '../types/pool';
 import { computeAvgDepthM, estimateVolumeM3 } from '../lib/poolVolume';
 import { PoolStatusBadge } from '../components/PoolStatusBadge';
@@ -154,6 +162,15 @@ function cleanOptionalFields<T extends Record<string, unknown>>(obj: T): Partial
   return entries.length ? (Object.fromEntries(entries) as Partial<T>) : undefined;
 }
 
+function resolveClientName(
+  clients: Client[],
+  clientId?: string
+): string | undefined {
+  if (!clientId) return undefined;
+  const c = clients.find((x) => x.id === clientId || (x as { uid?: string }).uid === clientId);
+  return c?.name;
+}
+
 function deepRemoveUndefined(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => deepRemoveUndefined(item));
@@ -197,8 +214,11 @@ export default function PoolsPage() {
       setPools(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PoolRecord)));
     });
     const unsubClients = onSnapshot(collection(db, 'users'), (snap) => {
+      // Solo clientes reales: `isClient` también lo tienen admin/worker por el seed y no deben aparecer como propietarios.
       setClients(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() } as Client)).filter((c) => c.role === 'client' || (c as any).isClient)
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as Client))
+          .filter((c) => c.role === 'client')
       );
     });
     return () => {
@@ -274,6 +294,20 @@ export default function PoolsPage() {
     };
 
     return deepRemoveUndefined(rawPayload) as Record<string, unknown>;
+  };
+
+  const handleQuickOwnerChange = async (poolId: string, nextClientId: string) => {
+    try {
+      await updateDoc(doc(db, 'pools', poolId), {
+        clientId: nextClientId ? nextClientId : deleteField(),
+      });
+      toast.success(t('pools.toastUpdated'));
+    } catch (e: any) {
+      console.error('Error updating pool owner:', e);
+      toast.error(t('pools.toastSaveError'), {
+        description: e?.message || e?.code || 'Unknown error',
+      });
+    }
   };
 
   const handleAddPool = async (e: React.FormEvent) => {
@@ -662,10 +696,9 @@ export default function PoolsPage() {
                 <div className="h-48 md:h-full min-h-[12rem] rounded-xl overflow-hidden border border-slate-200 relative">
                   {showPickerMap ? (
                     <Map
-                      defaultCenter={draft.coordinates}
-                      center={draft.coordinates}
+                      defaultCenter={draft.coordinates ?? MIAMI_CENTER}
+                      center={draft.coordinates ?? MIAMI_CENTER}
                       defaultZoom={15}
-                      mapId="pool_picker_map"
                       onClick={(e) => {
                         if (e.detail.latLng) {
                           setDraft((prev) => ({ ...prev, coordinates: e.detail.latLng! }));
@@ -673,9 +706,19 @@ export default function PoolsPage() {
                         }
                       }}
                     >
-                      <AdvancedMarker position={draft.coordinates}>
-                        <Pin background={'#2563eb'} glyphColor={'#fff'} borderColor={'#000'} />
-                      </AdvancedMarker>
+                      <Marker
+                        position={draft.coordinates ?? MIAMI_CENTER}
+                        draggable
+                        onDragEnd={(e) => {
+                          const latLng = e.latLng;
+                          if (!latLng) return;
+                          setDraft((prev) => ({
+                            ...prev,
+                            coordinates: { lat: latLng.lat(), lng: latLng.lng() },
+                          }));
+                          setIsAddressValidated(true);
+                        }}
+                      />
                     </Map>
                   ) : (
                     <div className="h-full w-full bg-slate-100 animate-pulse" aria-hidden />
@@ -706,7 +749,7 @@ export default function PoolsPage() {
 
         <div className="grid gap-3">
           {pools.map((pool) => (
-            <Card key={pool.id} className="p-4 flex justify-between items-center hover:border-blue-200 transition-colors gap-3">
+            <Card key={pool.id} className="p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center hover:border-blue-200 transition-colors gap-3">
               <Link to={`/pools/${pool.id}`} className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="bg-blue-50 p-2 rounded-lg text-blue-600 shrink-0">
                   <Waves className="w-5 h-5" />
@@ -721,7 +764,8 @@ export default function PoolsPage() {
                   </p>
                   {pool.clientId && (
                     <p className="text-[10px] text-blue-600 font-bold mt-1 uppercase truncate">
-                      {t('pools.propLabel')} {clients.find((c) => c.id === pool.clientId)?.name || t('pools.loadingName')}
+                      {t('pools.propLabel')}{' '}
+                      {resolveClientName(clients, pool.clientId) || t('pools.loadingName')}
                     </p>
                   )}
                   {pool.volumeM3 != null && pool.volumeM3 > 0 && (
@@ -730,6 +774,31 @@ export default function PoolsPage() {
                 </div>
                 <ChevronRight className="w-5 h-5 text-slate-300 shrink-0" />
               </Link>
+              <div className="flex flex-col gap-2 shrink-0 w-full sm:w-48">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                  {t('pools.ownerClient')}
+                </label>
+                <select
+                  className="w-full rounded-lg border-slate-200 p-2 text-sm bg-white"
+                  value={pool.clientId || ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    void handleQuickOwnerChange(pool.id, v);
+                  }}
+                >
+                  <option value="">{t('pools.noOwner')}</option>
+                  {pool.clientId && !clients.some((c) => c.id === pool.clientId) ? (
+                    <option value={pool.clientId}>
+                      {resolveClientName(clients, pool.clientId) || `${pool.clientId.slice(0, 8)}…`}
+                    </option>
+                  ) : null}
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="flex gap-2 shrink-0">
                 <button type="button" onClick={() => handleEdit(pool)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
                   <Edit2 className="w-4 h-4" />

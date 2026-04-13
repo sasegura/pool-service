@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, query, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
@@ -37,17 +37,28 @@ export default function TeamPage() {
     e.preventDefault();
     try {
       if (editingUserId) {
-        await updateDoc(doc(db, 'users', editingUserId), newWorker);
+        const email = newWorker.email.trim().toLowerCase();
+        await updateDoc(doc(db, 'users', editingUserId), {
+          name: newWorker.name.trim(),
+          email,
+          role: newWorker.role,
+        });
         toast.success(t('team.toastUpdated'));
       } else {
-        const existing = allUsers.find(u => u.email === newWorker.email);
+        const email = newWorker.email.trim().toLowerCase();
+        const existing = allUsers.find((u) => u.email?.trim().toLowerCase() === email);
         if (existing) {
           toast.error(t('team.toastEmailExists'));
           return;
         }
 
-        await addDoc(collection(db, 'users'), {
-          ...newWorker,
+        const ref = doc(collection(db, 'users'));
+        await setDoc(ref, {
+          name: newWorker.name.trim(),
+          email,
+          role: newWorker.role,
+          /** Mismo valor que el id del documento; las piscinas guardan `clientId` = id de `users`. */
+          uid: ref.id,
           createdAt: new Date().toISOString(),
         });
         toast.success(t('team.toastPreregistered'));
@@ -141,10 +152,16 @@ export default function TeamPage() {
             </div>
             <div className="flex gap-2">
               <Button type="submit" className="flex-1">{editingUserId ? t('team.submitEditUser') : t('team.submitNewUser')}</Button>
-              <Button variant="outline" onClick={() => {
-                setShowWorkerForm(false);
-                setEditingUserId(null);
-              }}>{t('common.cancel')}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowWorkerForm(false);
+                  setEditingUserId(null);
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
             </div>
           </form>
         </Card>
