@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
 import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle } from 'lucide-react';
-import { format, isWithinInterval, parseISO, getDay, addDays, startOfDay } from 'date-fns';
+import { format, parseISO, getDay, addDays, startOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
@@ -134,28 +134,35 @@ export default function WorkerDashboard() {
       return true;
     }
 
-    // 3. Scheduled route (Range + Recurrence)
-    if (route.startDate && route.endDate) {
+    // 3. Scheduled route (Range + Recurrence); endDate opcional = sin límite superior
+    if (route.startDate) {
       const start = startOfDay(parseISO(route.startDate));
-      const end = startOfDay(parseISO(route.endDate));
+      if (Number.isNaN(start.getTime())) return false;
+      if (targetDate < start) return false;
 
-      if (isWithinInterval(targetDate, { start, end })) {
-        if (!route.recurrence || route.recurrence === 'none') return true;
-        
-        if (route.recurrence === 'daily') return true;
-        
-        if (route.recurrence === 'weekly' && route.daysOfWeek) {
-          return route.daysOfWeek.includes(dayOfWeek);
-        }
+      if (route.endDate) {
+        const end = startOfDay(parseISO(route.endDate));
+        if (Number.isNaN(end.getTime())) return false;
+        if (targetDate > end) return false;
+      }
 
-        if (route.recurrence === 'bi-weekly') {
-          const diffDays = Math.floor((targetDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-          return (diffDays % 14) === 0;
-        }
+      if (!route.recurrence || route.recurrence === 'none') return true;
 
-        if (route.recurrence === 'monthly') {
-          return targetDate.getDate() === start.getDate();
-        }
+      if (route.recurrence === 'daily') return true;
+
+      if (route.recurrence === 'weekly' && route.daysOfWeek) {
+        return route.daysOfWeek.includes(dayOfWeek);
+      }
+
+      if (route.recurrence === 'bi-weekly') {
+        const diffDays = Math.floor(
+          (targetDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        return diffDays >= 0 && diffDays % 14 === 0;
+      }
+
+      if (route.recurrence === 'monthly') {
+        return targetDate.getDate() === start.getDate();
       }
     }
 

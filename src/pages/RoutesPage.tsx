@@ -26,10 +26,12 @@ import {
   ArrowDown,
   CalendarRange,
   Users,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   addDays,
+  differenceInCalendarDays,
   endOfWeek,
   format,
   getDay,
@@ -43,6 +45,9 @@ import { useAuth } from '../contexts/AuthContext';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
+
+/** Ocultar navegación Semana − / + junto al selector de fecha (reactivar cuando haga falta) */
+const SHOW_CALENDAR_WEEK_STEPPER = false;
 
 interface Pool {
   id: string;
@@ -83,8 +88,9 @@ function defaultNewRouteForm() {
     workerId: '',
     date: today,
     startDate: today,
-    endDate: today,
-    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly',
+    endDate: '' as string,
+    hasEndDate: false,
+    recurrence: 'weekly' as 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly',
     daysOfWeek: [] as number[],
     poolIds: [] as string[],
     routeName: '',
@@ -115,13 +121,25 @@ export default function RoutesPage() {
   const [planFromDate, setPlanFromDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [planHorizonDays, setPlanHorizonDays] = useState(14);
   const [planningSelectedDate, setPlanningSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [planCalendarOpen, setPlanCalendarOpen] = useState(false);
+  const [pickedSourceRouteId, setPickedSourceRouteId] = useState<string | null>(null);
+  /** fecha -> ids de rutas origen a instanciar ese día (orden = planningPriority) */
+  const [placementsByDate, setPlacementsByDate] = useState<Record<string, string[]>>({});
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
   /** Semana modelo: cualquier fecha dentro de la semana (lun–dom) de la que se copian rutas por día de la semana */
   const [planSourceWeekAnchor, setPlanSourceWeekAnchor] = useState(() =>
     format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
   );
   /** Si la ruta origen no lleva técnico, las instancias usarán este (vacío = primer técnico de la lista) */
   const [fallbackWorkerIdForPlan, setFallbackWorkerIdForPlan] = useState('');
+
+  const weeklyRequiresAtLeastOneDay = useMemo(
+    () =>
+      newRoute.isScheduled &&
+      newRoute.recurrence === 'weekly' &&
+      newRoute.daysOfWeek.length === 0,
+    [newRoute.isScheduled, newRoute.recurrence, newRoute.daysOfWeek]
+  );
 
   const selectedRoute = routes.find((r) => r.id === selectedRouteId);
   const selectedRoutePools = (selectedRoute?.poolIds || [])
@@ -143,10 +161,98 @@ export default function RoutesPage() {
       .sort((a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0));
   }, [datedRoutes, planningSelectedDate]);
 
-  const recurringDefinitions = useMemo(
-    () => routes.filter((r) => !!r.startDate),
+  const routeMatchesDate = useCallback((route: Route, dateStr: string) => {
+    if (route.date) return route.date === dateStr;
+    if (!route.startDate) return false;
+
+    const current = parseISO(dateStr);
+    const start = parseISO(route.startDate);
+    if (Number.isNaN(current.getTime()) || Number.isNaN(start.getTime())) return false;
+    if (current < start) return false;
+
+    if (route.endDate) {
+      const end = parseISO(route.endDate);
+      if (Number.isNaN(end.getTime())) return false;
+      if (current > end) return false;
+    }
+
+    const dow = getDay(current);
+    const allowedDays = route.daysOfWeek || [];
+    const matchesDay = allowedDays.length === 0 || allowedDays.includes(dow);
+
+    switch (route.recurrence) {
+      case 'daily':
+        return true;
+      case 'weekly':
+        return matchesDay;
+      case 'bi-weekly':
+        return matchesDay && Math.floor(differenceInCalendarDays(current, start) / 7) % 2 === 0;
+      case 'monthly':
+        return current.getDate() === start.getDate();
+      case 'none':
+      default:
+        return matchesDay;
+    }
+  }, []);
+
+  const weeklyPlanningDays = useMemo(() => {
+    const anchor = parseISO(planningSelectedDate);
+    if (Number.isNaN(anchor.getTime())) return [] as { dateStr: string; label: string; routes: Route[] }[];
+    const weekStart = startOfWeek(anchor, { weekStartsOn: 1 });
+    return Array.from({ length: 7 }).map((_, idx) => {
+      const day = addDays(weekStart, idx);
+      const dateStr = format(day, 'yyyy-MM-dd');
+      return {
+        dateStr,
+        label: format(day, 'EEEE'),
+        routes: routes
+          .filter((r) => routeMatchesDate(r, dateStr))
+          .sort((a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0),
+          ),
+      };
+    });
+  }, [routes, planningSelectedDate, routeMatchesDate]);
+
+  const recurringDefinitions = useMemo(() => routes, [routes]);
+
+  /** Rutas concretas con fecha (no definiciones por rango) — candidatas a colocar en el calendario */
+  const assignableRoutes = useMemo(
+    () =>
+      routes
+        .filter((r) => !!r.date && !r.startDate)
+        .sort(
+          (a, b) =>
+            (a.date || '').localeCompare(b.date || '') ||
+            (a.routeName || '').localeCompare(b.routeName || '')
+        ),
     [routes]
   );
+
+  const calendarWeeks = useMemo(() => {
+    const d0 = parseISO(planFromDate);
+    if (Number.isNaN(d0.getTime())) return [] as { weekLabel: string; days: { dateStr: string; sub: string }[] }[];
+    const gridStart = startOfWeek(d0, { weekStartsOn: 1 });
+    const rangeEnd = addDays(d0, Math.max(0, planHorizonDays - 1));
+    const gridEnd = endOfWeek(rangeEnd, { weekStartsOn: 1 });
+    const weeks: { weekLabel: string; days: { dateStr: string; sub: string }[] }[] = [];
+    let cur = gridStart;
+    while (cur <= gridEnd) {
+      const days: { dateStr: string; sub: string }[] = [];
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(cur, i);
+        days.push({
+          dateStr: format(d, 'yyyy-MM-dd'),
+          sub: format(d, 'd MMM'),
+        });
+      }
+      weeks.push({
+        weekLabel: `${format(cur, 'd MMM')} – ${format(addDays(cur, 6), 'd MMM yyyy')}`,
+        days,
+      });
+      cur = addDays(cur, 7);
+    }
+    return weeks;
+  }, [planFromDate, planHorizonDays]);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -180,6 +286,14 @@ export default function RoutesPage() {
       toast.error('Indica la fecha del servicio');
       return;
     }
+    if (newRoute.isScheduled && newRoute.hasEndDate && !newRoute.endDate) {
+      toast.error('Indica la fecha fin o desmarca “Incluir fecha fin”');
+      return;
+    }
+    if (weeklyRequiresAtLeastOneDay) {
+      toast.error('Selecciona al menos un día de la semana');
+      return;
+    }
     try {
       const routeToSave: Record<string, unknown> = {
         poolIds: newRoute.poolIds,
@@ -190,7 +304,8 @@ export default function RoutesPage() {
 
       if (newRoute.isScheduled) {
         routeToSave.startDate = newRoute.startDate;
-        routeToSave.endDate = newRoute.endDate;
+        routeToSave.endDate =
+          newRoute.hasEndDate && newRoute.endDate ? newRoute.endDate : null;
         routeToSave.recurrence = newRoute.recurrence;
         routeToSave.daysOfWeek = newRoute.daysOfWeek;
         routeToSave.date = '';
@@ -220,13 +335,23 @@ export default function RoutesPage() {
     }
   };
 
+  const tryCloseRouteForm = useCallback(() => {
+    if (weeklyRequiresAtLeastOneDay) {
+      toast.error('Selecciona al menos un día de la semana');
+      return;
+    }
+    setShowRouteForm(false);
+    setEditingRouteId(null);
+  }, [weeklyRequiresAtLeastOneDay]);
+
   const handleEdit = (route: Route) => {
     const today = format(new Date(), 'yyyy-MM-dd');
     setNewRoute({
       workerId: route.workerId || '',
       date: route.date || today,
       startDate: route.startDate || today,
-      endDate: route.endDate || today,
+      endDate: route.endDate || '',
+      hasEndDate: !!route.endDate,
       recurrence: route.recurrence || 'none',
       daysOfWeek: route.daysOfWeek || [],
       poolIds: route.poolIds,
@@ -248,17 +373,37 @@ export default function RoutesPage() {
     });
   };
 
-  const getAssignedRoute = (poolId: string) => {
-    const assignedRoute = routes.find(
-      (r) =>
-        r.date === newRoute.date &&
-        r.poolIds.includes(poolId) &&
-        r.id !== editingRouteId
-    );
-    if (!assignedRoute) return null;
-    const worker = workers.find((w) => w.id === assignedRoute.workerId);
-    return worker ? worker.name : 'Otra ruta';
-  };
+  /** Otras rutas (no la que se edita) que ya incluyen esta piscina — informativo, no bloquea */
+  const getOtherRoutesWithPool = useCallback(
+    (poolId: string) =>
+      routes.filter((r) => r.id !== editingRouteId && r.poolIds.includes(poolId)),
+    [routes, editingRouteId]
+  );
+
+  const formatRouteAssignmentHint = useCallback(
+    (r: Route) => {
+      const name = (r.routeName || '').trim() || 'Ruta';
+      const worker = workers.find((w) => w.id === r.workerId)?.name;
+      const tech = worker ? ` · ${worker}` : '';
+      if (r.date) return `${name} · ${r.date}${tech}`;
+      if (r.startDate) {
+        const range = r.endDate ? `${r.startDate} → ${r.endDate}` : `desde ${r.startDate}`;
+        return `${name} · ${range}${tech}`;
+      }
+      return `${name}${tech}`;
+    },
+    [workers]
+  );
+
+  const getPoolAssignmentHint = useCallback(
+    (poolId: string) => {
+      const others = getOtherRoutesWithPool(poolId);
+      if (others.length === 0) return null;
+      if (others.length === 1) return formatRouteAssignmentHint(others[0]);
+      return `${others.length} rutas más: ${formatRouteAssignmentHint(others[0])}`;
+    },
+    [getOtherRoutesWithPool, formatRouteAssignmentHint]
+  );
 
   const deleteRoute = async (id: string) => {
     if (confirm('¿Eliminar esta ruta?')) {
@@ -311,22 +456,15 @@ export default function RoutesPage() {
     return keys;
   }, [routes]);
 
-  const handleGeneratePlanning = async () => {
-    const start = parseISO(planFromDate);
-    if (Number.isNaN(start.getTime())) {
-      toast.error('Fecha de inicio no válida');
-      return;
-    }
+  const sortByPriority = (a: Route, b: Route) =>
+    (a.planningPriority ?? 0) - (b.planningPriority ?? 0) ||
+    (a.order ?? 0) - (b.order ?? 0);
 
+  const buildByDowFromSourceWeek = (): Record<number, Route[]> | null => {
     const anchor = parseISO(planSourceWeekAnchor);
-    if (Number.isNaN(anchor.getTime())) {
-      toast.error('Semana origen no válida');
-      return;
-    }
-
+    if (Number.isNaN(anchor.getTime())) return null;
     const weekStart = startOfWeek(anchor, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(anchor, { weekStartsOn: 1 });
-
     const byDow: Record<number, Route[]> = {};
     for (const r of routes) {
       if (!r.date) continue;
@@ -337,33 +475,105 @@ export default function RoutesPage() {
       if (!byDow[dow]) byDow[dow] = [];
       byDow[dow].push(r);
     }
-    for (const k of Object.keys(byDow)) {
-      byDow[+k].sort(
-        (a, b) =>
-          (a.planningPriority ?? 0) - (b.planningPriority ?? 0) ||
-          (a.order ?? 0) - (b.order ?? 0)
-      );
-    }
+    for (const k of Object.keys(byDow)) byDow[+k].sort(sortByPriority);
+    return Object.keys(byDow).length ? byDow : null;
+  };
 
-    const hasAnyPattern = Object.keys(byDow).length > 0;
-    if (!hasAnyPattern) {
+  /** Fallback: si la semana origen está vacía, usa todas las rutas con fecha existentes */
+  const buildByDowFromAllDatedRoutes = (): Record<number, Route[]> | null => {
+    const byDow: Record<number, Route[]> = {};
+    for (const r of routes) {
+      if (!r.date || r.startDate) continue;
+      const d = parseISO(r.date);
+      if (Number.isNaN(d.getTime())) continue;
+      const dow = getDay(d);
+      if (!byDow[dow]) byDow[dow] = [];
+      byDow[dow].push(r);
+    }
+    for (const k of Object.keys(byDow)) byDow[+k].sort(sortByPriority);
+    return Object.keys(byDow).length ? byDow : null;
+  };
+
+  /** Rellena el calendario repitiendo el patrón de la semana origen (mismo día de la semana) */
+  const applyWeeklyPatternToPlacements = () => {
+    const start = parseISO(planFromDate);
+    if (Number.isNaN(start.getTime())) {
+      toast.error('Fecha de inicio no válida');
+      return;
+    }
+    const fromSourceWeek = buildByDowFromSourceWeek();
+    const byDow = fromSourceWeek || buildByDowFromAllDatedRoutes();
+    if (!byDow) {
       toast.error(
-        'No hay rutas con fecha en la semana origen (lunes–domingo de la fecha elegida). Crea ahí tus rutas modelo y vuelve a generar.'
+        'No hay rutas con fecha disponibles para generar planificación. Crea al menos una ruta con fecha.'
       );
       return;
     }
+    const next: Record<string, string[]> = {};
+    for (let i = 0; i < planHorizonDays; i++) {
+      const d = addDays(start, i);
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const dow = getDay(d);
+      const sources = byDow[dow] || [];
+      if (sources.length) next[dateStr] = sources.map((s) => s.id);
+    }
+    setPlacementsByDate(next);
+    if (fromSourceWeek) {
+      toast.success('Calendario rellenado con el patrón de la semana origen');
+    } else {
+      toast.success('Semana origen vacía: se usaron todas las rutas existentes por día de semana');
+    }
+  };
 
-    let defaultWorker = '';
+  const openPlanningCalendar = () => {
+    setPickedSourceRouteId(null);
+    setPlacementsByDate({});
+    setPlanCalendarOpen(true);
+  };
+
+  const assignSourceToDate = (sourceId: string, dateStr: string) => {
+    setPlacementsByDate((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const d of Object.keys(prev)) {
+        next[d] = prev[d].filter((id) => id !== sourceId);
+        if (next[d].length === 0) delete next[d];
+      }
+      const list = next[dateStr] ? [...next[dateStr]] : [];
+      if (!list.includes(sourceId)) list.push(sourceId);
+      next[dateStr] = list;
+      return next;
+    });
+    setPickedSourceRouteId(null);
+  };
+
+  const removePlacementFromDate = (dateStr: string, sourceId: string) => {
+    setPlacementsByDate((prev) => {
+      const next = { ...prev };
+      next[dateStr] = (next[dateStr] || []).filter((id) => id !== sourceId);
+      if (next[dateStr].length === 0) delete next[dateStr];
+      return next;
+    });
+  };
+
+  const resolveDefaultWorkerForPlan = () => {
     if (
       fallbackWorkerIdForPlan &&
       workers.some((w) => w.id === fallbackWorkerIdForPlan)
     ) {
-      defaultWorker = fallbackWorkerIdForPlan;
-    } else if (workers.length > 0) {
-      defaultWorker = workers[0].id;
+      return fallbackWorkerIdForPlan;
+    }
+    return workers[0]?.id || '';
+  };
+
+  const savePlanFromCalendar = async () => {
+    const entries = Object.entries(placementsByDate).filter(([, ids]) => ids.length > 0);
+    if (entries.length === 0) {
+      toast.error('Coloca al menos una ruta en un día del calendario');
+      return;
     }
 
-    setIsGenerating(true);
+    const defaultWorker = resolveDefaultWorkerForPlan();
+    setIsSavingPlan(true);
     const keys = existingPlannedKeys();
     let created = 0;
     let skipped = 0;
@@ -380,17 +590,18 @@ export default function RoutesPage() {
         }
       };
 
-      for (let i = 0; i < planHorizonDays; i++) {
-        const d = addDays(start, i);
-        const dateStr = format(d, 'yyyy-MM-dd');
-        const dow = getDay(d);
-        const sources = byDow[dow] || [];
-
+      for (const [dateStr, sourceIds] of entries) {
         let p = 0;
-        for (const src of sources) {
-          const key = `${dateStr}|${src.id}`;
+        for (const srcId of sourceIds) {
+          const src = routes.find((r) => r.id === srcId);
+          if (!src) {
+            p++;
+            continue;
+          }
+          const key = `${dateStr}|${srcId}`;
           if (keys.has(key)) {
             skipped++;
+            p++;
             continue;
           }
           keys.add(key);
@@ -405,7 +616,7 @@ export default function RoutesPage() {
             workerId,
             date: dateStr,
             status: 'pending',
-            templateId: src.id,
+            templateId: srcId,
             planningPriority: p,
             createdAt: new Date().toISOString(),
             recurrence: 'none',
@@ -413,20 +624,20 @@ export default function RoutesPage() {
           p++;
           created++;
           ops++;
-          if (ops >= 450) {
-            await flush();
-          }
+          if (ops >= 450) await flush();
         }
       }
 
       await flush();
       toast.success(
-        `Plan generado: ${created} rutas nuevas${skipped ? ` · ${skipped} ya existían` : ''}`
+        `Plan guardado: ${created} rutas nuevas${skipped ? ` · ${skipped} ya existían` : ''}`
       );
+      setPlanCalendarOpen(false);
+      setPlacementsByDate({});
     } catch {
-      toast.error('Error al generar la planificación');
+      toast.error('Error al guardar la planificación');
     } finally {
-      setIsGenerating(false);
+      setIsSavingPlan(false);
     }
   };
 
@@ -473,7 +684,7 @@ export default function RoutesPage() {
           <div>
             <h2 className="text-2xl font-black text-slate-900">Gestión de rutas</h2>
             <p className="text-sm text-slate-500 mt-1">
-              Generación a partir de una semana modelo y ajuste manual por día.
+              Calendario semanal para planificar y ajuste manual por día en el dashboard del técnico.
             </p>
           </div>
           <Button
@@ -490,9 +701,27 @@ export default function RoutesPage() {
         </div>
 
         {showRouteForm && (
-          <Card className="p-4 border-blue-200 bg-blue-50/80">
-            <form onSubmit={handleAddRoute} className="space-y-4">
-              <h3 className="font-bold text-blue-900">
+          <div
+            className="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-slate-900/55 p-3 sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="route-form-title"
+            onClick={tryCloseRouteForm}
+          >
+            <Card
+              className="relative my-4 w-full max-w-4xl border-blue-200 bg-blue-50/80 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="absolute right-3 top-3 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-800"
+                onClick={tryCloseRouteForm}
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <form onSubmit={handleAddRoute} className="space-y-4 p-4 pr-14">
+              <h3 id="route-form-title" className="font-bold text-blue-900">
                 {editingRouteId ? 'Editar ruta' : 'Nueva ruta'}
               </h3>
 
@@ -537,16 +766,42 @@ export default function RoutesPage() {
                         onChange={(e) => setNewRoute({ ...newRoute, startDate: e.target.value })}
                       />
                     </div>
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Fecha fin
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newRoute.hasEndDate}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setNewRoute((prev) => ({
+                              ...prev,
+                              hasEndDate: checked,
+                              endDate: checked
+                                ? prev.endDate || prev.startDate
+                                : '',
+                            }));
+                          }}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Incluir fecha fin
+                        </span>
                       </label>
-                      <input
-                        type="date"
-                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
-                        value={newRoute.endDate}
-                        onChange={(e) => setNewRoute({ ...newRoute, endDate: e.target.value })}
-                      />
+                      {newRoute.hasEndDate && (
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Fecha fin
+                          </label>
+                          <input
+                            type="date"
+                            className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                            value={newRoute.endDate}
+                            onChange={(e) =>
+                              setNewRoute({ ...newRoute, endDate: e.target.value })
+                            }
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -727,18 +982,19 @@ export default function RoutesPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-white rounded-lg border border-slate-200">
                     {pools.map((p) => {
-                      const assignedTo = getAssignedRoute(p.id);
+                      const otherHint = getPoolAssignmentHint(p.id);
                       const isSelected = newRoute.poolIds.includes(p.id);
 
                       return (
                         <label
                           key={p.id}
+                          title={otherHint || undefined}
                           className={cn(
                             'flex items-center gap-2 text-sm p-2 rounded-lg cursor-pointer transition-colors relative',
                             isSelected
-                              ? 'bg-blue-50 border-blue-200 border'
+                              ? 'bg-blue-50 border-blue-200 border ring-1 ring-blue-100'
                               : 'bg-slate-50 border-transparent border',
-                            assignedTo && !isSelected ? 'opacity-60' : ''
+                            otherHint && !isSelected ? 'opacity-75' : ''
                           )}
                         >
                           <input
@@ -747,14 +1003,24 @@ export default function RoutesPage() {
                             checked={isSelected}
                             onChange={() => togglePoolInRoute(p.id)}
                           />
-                          <div className="flex-1">
-                            <div className="font-bold flex items-center justify-between gap-2">
-                              <span>{p.name}</span>
-                              {assignedTo && (
-                                <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-                                  <AlertCircle className="w-2.5 h-2.5" /> {assignedTo}
-                                </span>
-                              )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold flex items-start justify-between gap-2">
+                              <span className="truncate">{p.name}</span>
+                              <div className="flex flex-col items-end gap-0.5 shrink-0">
+                                {isSelected && (
+                                  <span className="text-[9px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded">
+                                    En esta ruta
+                                  </span>
+                                )}
+                                {otherHint && (
+                                  <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded flex items-center gap-0.5 max-w-[140px]">
+                                    <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                                    <span className="truncate" title={otherHint}>
+                                      También en otra ruta
+                                    </span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </label>
@@ -810,23 +1076,26 @@ export default function RoutesPage() {
                 <div className="h-64 rounded-xl overflow-hidden border border-slate-200 relative">
                   <Map defaultCenter={MIAMI_CENTER} defaultZoom={11} mapId="route_creation_map">
                     {pools.map((p) => {
-                      const assignedTo = getAssignedRoute(p.id);
+                      const otherHint = getPoolAssignmentHint(p.id);
                       const isSelected = newRoute.poolIds.includes(p.id);
 
                       return (
                         <AdvancedMarker
                           key={p.id}
                           position={p.coordinates || MIAMI_CENTER}
+                          title={otherHint ? `${p.name}${otherHint ? ` — ${otherHint}` : ''}` : p.name}
                           onClick={() => togglePoolInRoute(p.id)}
                         >
                           <Pin
-                            background={isSelected ? '#2563eb' : assignedTo ? '#f59e0b' : '#94a3b8'}
+                            background={
+                              isSelected ? '#2563eb' : otherHint ? '#f59e0b' : '#94a3b8'
+                            }
                             glyphColor={'#fff'}
                             borderColor={'#000'}
                           >
                             {isSelected
                               ? (newRoute.poolIds.indexOf(p.id) + 1).toString()
-                              : assignedTo
+                              : otherHint
                                 ? '!'
                                 : ''}
                           </Pin>
@@ -841,169 +1110,113 @@ export default function RoutesPage() {
                 <Button type="submit" className="flex-1">
                   {editingRouteId ? 'Actualizar' : 'Guardar'}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setShowRouteForm(false);
-                    setEditingRouteId(null);
-                  }}
-                >
+                <Button type="button" variant="outline" onClick={tryCloseRouteForm}>
                   Cancelar
                 </Button>
               </div>
-            </form>
-          </Card>
+              </form>
+            </Card>
+          </div>
         )}
 
-        {selectedRouteId && !showRouteForm && (
-          <Card className="p-4 border-blue-200 bg-white overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <MapIcon className="w-4 h-4 text-blue-600" />
-                Mapa:{' '}
-                {workers.find((w) => w.id === routes.find((r) => r.id === selectedRouteId)?.workerId)
-                  ?.name || 'Sin técnico'}
-              </h3>
-              <Button variant="outline" size="sm" onClick={() => setSelectedRouteId(null)}>
-                Cerrar
-              </Button>
-            </div>
-            <div className="h-80 rounded-xl overflow-hidden border border-slate-200">
-              <Map
-                key={selectedRouteId}
-                defaultCenter={mapCenter}
-                defaultZoom={12}
-                mapId="route_view_map"
-              >
-                {selectedRoutePools.map((pool, index) => (
-                  <AdvancedMarker
-                    key={`${selectedRouteId}-${pool.id}`}
-                    position={pool.coordinates || MIAMI_CENTER}
-                  >
-                    <Pin background={'#2563eb'} glyphColor={'#fff'} borderColor={'#000'}>
-                      {(index + 1).toString()}
-                    </Pin>
-                  </AdvancedMarker>
-                ))}
-              </Map>
-            </div>
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {routes
-                .find((r) => r.id === selectedRouteId)
-                ?.poolIds.map((poolId, index) => {
-                  const pool = pools.find((p) => p.id === poolId);
-                  return (
-                    <div
-                      key={poolId}
-                      className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px]"
-                    >
-                      <span className="font-black text-blue-600 mr-1">#{index + 1}</span>
-                      <span className="font-bold text-slate-700">{pool?.name || '…'}</span>
-                    </div>
-                  );
-                })}
-            </div>
-          </Card>
-        )}
-
-        <div className="grid gap-6 lg:grid-cols-5">
-          <Card className="p-5 lg:col-span-2 border-slate-200 space-y-4">
-            <div className="flex items-center gap-2 text-slate-900 font-bold">
-              <CalendarRange className="w-5 h-5 text-blue-600" />
-              Generar planificación
-            </div>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Elige la <strong>semana origen</strong> (lunes a domingo de la fecha que indiques): se
-              copian todas las rutas con fecha de esa semana a cada día equivalente del periodo
-              (mismo día de la semana). No duplica si ya existe una instancia generada desde la misma
-              ruta origen en esa fecha.
-            </p>
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">
-                Semana origen (cualquier día de esa semana)
-              </label>
-              <input
-                type="date"
-                className="w-full rounded-lg border-slate-200 p-2 text-sm"
-                value={planSourceWeekAnchor}
-                onChange={(e) => setPlanSourceWeekAnchor(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">
-                Técnico si la ruta origen va sin asignar
-              </label>
-              <select
-                className="w-full rounded-lg border-slate-200 p-2 text-sm bg-white"
-                value={fallbackWorkerIdForPlan}
-                onChange={(e) => setFallbackWorkerIdForPlan(e.target.value)}
-              >
-                <option value="">Usar el primer técnico de la lista</option>
-                {workers.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">
-                  Desde (inicio del periodo a generar)
-                </label>
-                <input
-                  type="date"
-                  className="w-full rounded-lg border-slate-200 p-2 text-sm"
-                  value={planFromDate}
-                  onChange={(e) => setPlanFromDate(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">
-                  Días hacia adelante
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
-                  className="w-full rounded-lg border-slate-200 p-2 text-sm"
-                  value={planHorizonDays}
-                  onChange={(e) => setPlanHorizonDays(Number(e.target.value) || 1)}
-                />
-              </div>
-            </div>
-            <Button
-              className="w-full gap-2"
-              onClick={handleGeneratePlanning}
-              disabled={isGenerating}
-              isLoading={isGenerating}
-            >
-              Generar planificación
-            </Button>
-          </Card>
-
-          <Card className="p-5 lg:col-span-3 border-slate-200 space-y-4">
+        <div className="grid gap-6">
+          <Card className="p-5 border-slate-200 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex items-center gap-2 text-slate-900 font-bold">
-                <Users className="w-5 h-5 text-indigo-600" />
-                Ajuste manual del día
+                <CalendarRange className="w-5 h-5 text-indigo-600" />
+                Calendario semanal (rutas existentes)
               </div>
-              <input
-                type="date"
-                className="rounded-lg border-slate-200 p-2 text-sm font-bold text-slate-800"
-                value={planningSelectedDate}
-                onChange={(e) => setPlanningSelectedDate(e.target.value)}
-              />
+              {SHOW_CALENDAR_WEEK_STEPPER && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const d = parseISO(planningSelectedDate);
+                      if (!Number.isNaN(d.getTime())) {
+                        setPlanningSelectedDate(format(addDays(d, -7), 'yyyy-MM-dd'));
+                      }
+                    }}
+                  >
+                    Semana -
+                  </Button>
+                  <input
+                    type="date"
+                    className="rounded-lg border-slate-200 p-2 text-sm font-bold text-slate-800"
+                    value={planningSelectedDate}
+                    onChange={(e) => setPlanningSelectedDate(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const d = parseISO(planningSelectedDate);
+                      if (!Number.isNaN(d.getTime())) {
+                        setPlanningSelectedDate(format(addDays(d, 7), 'yyyy-MM-dd'));
+                      }
+                    }}
+                  >
+                    Semana +
+                  </Button>
+                </div>
+              )}
             </div>
             <p className="text-xs text-slate-500">
-              Prioridad: número más bajo = primero en el reparto. Reordena o cambia técnico; las
-              piscinas se editan con “Editar”.
+              Se muestra la planificación semanal con datos ya existentes. La generación automática
+              queda oculta temporalmente.
             </p>
 
-            {routesForPlanningDay.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+              {weeklyPlanningDays.map((day) => (
+                <div
+                  key={day.dateStr}
+                  className={cn(
+                    'rounded-xl border p-2 space-y-1',
+                    day.dateStr === planningSelectedDate
+                      ? 'border-indigo-400 bg-indigo-50/40'
+                      : 'border-slate-200 bg-white'
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="text-left w-full"
+                    onClick={() => setPlanningSelectedDate(day.dateStr)}
+                  >
+                    <div className="text-[10px] font-black uppercase text-slate-500">{day.label}</div>
+                  </button>
+                  <div className="space-y-1">
+                    {day.routes.length === 0 ? (
+                      <p className="text-[10px] text-slate-400">Sin rutas</p>
+                    ) : (
+                      day.routes.map((r) => {
+                        const worker = workers.find((w) => w.id === r.workerId);
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => setSelectedRouteId(r.id)}
+                            className="w-full rounded bg-slate-100 px-1.5 py-1 text-left hover:bg-slate-200"
+                          >
+                            <div className="text-[10px] font-bold text-slate-700 truncate">
+                              {r.routeName || worker?.name || 'Ruta'}
+                            </div>
+                            <div className="text-[9px] text-slate-500 truncate">
+                              {worker?.name || 'Sin técnico'}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* {routesForPlanningDay.length === 0 ? (
               <div className="text-sm text-slate-500 py-6 text-center border border-dashed border-slate-200 rounded-xl">
-                No hay rutas con esta fecha. Genera el plan o crea una ruta con fecha concreta.
+                No hay rutas con esta fecha.
               </div>
             ) : (
               <ul className="space-y-2">
@@ -1024,22 +1237,12 @@ export default function RoutesPage() {
                           </span>
                           <span className="text-[10px] text-slate-500">
                             {route.poolIds.length} piscinas
-                            {route.templateId ? ' · copia desde semana modelo' : ''}
                           </span>
                         </div>
                       </div>
-                      <select
-                        className="flex-1 min-w-0 rounded-lg border-slate-200 p-2 text-sm bg-white"
-                        value={route.workerId || ''}
-                        onChange={(e) => updatePlannedWorker(route.id, e.target.value)}
-                      >
-                        <option value="">Sin técnico</option>
-                        {workers.map((w) => (
-                          <option key={w.id} value={w.id}>
-                            {w.name}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex-1 min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                        {worker?.name || 'Sin técnico'}
+                      </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
@@ -1083,19 +1286,22 @@ export default function RoutesPage() {
                   );
                 })}
               </ul>
-            )}
+            )} */}
           </Card>
         </div>
 
         {recurringDefinitions.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">
-              Definiciones recurrentes (rango)
+              Rutas (listado completo)
             </h3>
             <div className="grid gap-2 sm:grid-cols-2">
               {recurringDefinitions.map((route) => {
                 const worker = workers.find((w) => w.id === route.workerId);
                 const isSelected = selectedRouteId === route.id;
+                const routePools = route.poolIds
+                  .map((poolId) => pools.find((p) => p.id === poolId))
+                  .filter(Boolean) as Pool[];
                 return (
                   <Card
                     key={route.id}
@@ -1118,14 +1324,32 @@ export default function RoutesPage() {
                           <Calendar className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                          <h4 className="font-bold text-slate-900 truncate">
+                          <h4 className="font-bold text-slate-900">
                             {route.routeName || 'Recurrencia'}
                           </h4>
                           <p className="text-xs text-slate-500">
-                            {route.startDate} → {route.endDate} ·{' '}
-                            {route.recurrence === 'none' ? 'Rango' : route.recurrence} ·{' '}
+                            {route.startDate
+                              ? `${route.startDate}${
+                                  route.endDate ? ` → ${route.endDate}` : ' · sin fecha fin'
+                                }`
+                              : route.date || 'Sin fecha'}{' '}
+                            · {route.recurrence === 'none' ? 'Puntual' : route.recurrence} ·{' '}
                             {worker?.name || 'Sin técnico'}
                           </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {routePools.length === 0 ? (
+                              <span className="text-[11px] text-slate-400">Sin piscinas asignadas</span>
+                            ) : (
+                              routePools.map((pool, poolIndex) => (
+                                <span
+                                  key={`${route.id}-${pool.id}`}
+                                  className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700"
+                                >
+                                  #{poolIndex + 1} {pool.name}
+                                </span>
+                              ))
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -1186,6 +1410,260 @@ export default function RoutesPage() {
               ))}
             </ul>
           </Card>
+        )}
+
+        {selectedRouteId && !showRouteForm && (
+          <Card className="p-4 border-blue-200 bg-white overflow-hidden">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                <MapIcon className="w-4 h-4 text-blue-600" />
+                Mapa:{' '}
+                {workers.find((w) => w.id === routes.find((r) => r.id === selectedRouteId)?.workerId)
+                  ?.name || 'Sin técnico'}
+              </h3>
+              <Button variant="outline" size="sm" onClick={() => setSelectedRouteId(null)}>
+                Cerrar
+              </Button>
+            </div>
+            <div className="h-80 rounded-xl overflow-hidden border border-slate-200">
+              <Map
+                key={selectedRouteId}
+                defaultCenter={mapCenter}
+                defaultZoom={12}
+                mapId="route_view_map"
+              >
+                {selectedRoutePools.map((pool, index) => (
+                  <AdvancedMarker
+                    key={`${selectedRouteId}-${pool.id}`}
+                    position={pool.coordinates || MIAMI_CENTER}
+                  >
+                    <Pin background={'#2563eb'} glyphColor={'#fff'} borderColor={'#000'}>
+                      {(index + 1).toString()}
+                    </Pin>
+                  </AdvancedMarker>
+                ))}
+              </Map>
+            </div>
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {routes
+                .find((r) => r.id === selectedRouteId)
+                ?.poolIds.map((poolId, index) => {
+                  const pool = pools.find((p) => p.id === poolId);
+                  return (
+                    <div
+                      key={poolId}
+                      className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px]"
+                    >
+                      <span className="font-black text-blue-600 mr-1">#{index + 1}</span>
+                      <span className="font-bold text-slate-700">{pool?.name || '…'}</span>
+                    </div>
+                  );
+                })}
+            </div>
+          </Card>
+        )}
+
+        {planCalendarOpen && (
+          <div
+            className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-900/55 p-3 sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="plan-calendar-title"
+            onClick={() => setPlanCalendarOpen(false)}
+          >
+            <Card
+              className="relative my-4 w-full max-w-6xl border-slate-200 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="absolute right-3 top-3 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-800"
+                onClick={() => setPlanCalendarOpen(false)}
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="p-5 sm:p-6 pr-14 space-y-4">
+                <div>
+                  <h3 id="plan-calendar-title" className="text-lg font-black text-slate-900">
+                    Planificación en calendario
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+                    1) Elige una ruta en la lista. 2) Pulsa el día del calendario donde debe
+                    ejecutarla el técnico. 3) Repite y pulsa <strong>Guardar plan</strong>. Las
+                    instancias nuevas reutilizan piscinas y técnico de la ruta origen (puedes
+                    cambiarlo después en “Ajuste manual del día”).
+                  </p>
+                </div>
+
+                {pickedSourceRouteId && (
+                  <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
+                    <span className="font-bold">Ruta seleccionada:</span>
+                    <span className="truncate">
+                      {routes.find((r) => r.id === pickedSourceRouteId)?.routeName ||
+                        routes.find((r) => r.id === pickedSourceRouteId)?.id}
+                    </span>
+                    <span className="text-indigo-600 shrink-0">→ toca un día</span>
+                  </div>
+                )}
+
+                <div className="grid gap-6 lg:grid-cols-12">
+                  <div className="lg:col-span-4 space-y-2">
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Rutas ({assignableRoutes.length})
+                    </h4>
+                    <div className="max-h-[min(420px,50vh)] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
+                      {assignableRoutes.length === 0 ? (
+                        <p className="p-4 text-sm text-slate-500">
+                          No hay rutas con fecha. Crea rutas con día concreto primero.
+                        </p>
+                      ) : (
+                        assignableRoutes.map((r) => {
+                          const w = workers.find((x) => x.id === r.workerId);
+                          const active = pickedSourceRouteId === r.id;
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() =>
+                                setPickedSourceRouteId((cur) => (cur === r.id ? null : r.id))
+                              }
+                              className={cn(
+                                'w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-slate-50',
+                                active ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-200' : ''
+                              )}
+                            >
+                              <div className="font-bold text-slate-900 truncate">
+                                {r.routeName || w?.name || 'Ruta'}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                {r.date} · {r.poolIds.length} piscinas · {w?.name || 'Sin técnico'}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-8 space-y-3 min-w-0">
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Calendario (semanas lun–dom)
+                    </h4>
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-3 space-y-4">
+                      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-400">
+                        {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((h) => (
+                          <div key={h}>{h}</div>
+                        ))}
+                      </div>
+                      {calendarWeeks.length === 0 ? (
+                        <p className="text-sm text-slate-500 py-4 text-center">
+                          Ajusta “Desde” y “Días hacia adelante” en el panel izquierdo y vuelve a
+                          abrir el calendario.
+                        </p>
+                      ) : (
+                        calendarWeeks.map((week) => (
+                          <div key={week.weekLabel} className="space-y-1">
+                            <div className="text-[10px] font-bold text-slate-400 px-0.5">
+                              {week.weekLabel}
+                            </div>
+                            <div className="grid grid-cols-7 gap-1">
+                              {week.days.map((cell) => {
+                                const placed = placementsByDate[cell.dateStr] || [];
+                                const todayStr = format(new Date(), 'yyyy-MM-dd');
+                                const isToday = cell.dateStr === todayStr;
+                                return (
+                                  <div
+                                    key={cell.dateStr}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      if (pickedSourceRouteId) {
+                                        assignSourceToDate(pickedSourceRouteId, cell.dateStr);
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (
+                                        (e.key === 'Enter' || e.key === ' ') &&
+                                        pickedSourceRouteId
+                                      ) {
+                                        e.preventDefault();
+                                        assignSourceToDate(pickedSourceRouteId, cell.dateStr);
+                                      }
+                                    }}
+                                    className={cn(
+                                      'min-h-[88px] rounded-lg border p-1.5 text-left transition-colors',
+                                      pickedSourceRouteId
+                                        ? 'cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50'
+                                        : 'cursor-default',
+                                      isToday ? 'border-blue-400 bg-blue-50/40' : 'border-slate-100'
+                                    )}
+                                  >
+                                    <div className="text-[10px] font-black text-slate-600 leading-none mb-1">
+                                      {cell.sub}
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                      {placed.map((sid) => {
+                                        const src = routes.find((x) => x.id === sid);
+                                        const label =
+                                          src?.routeName ||
+                                          workers.find((x) => x.id === src?.workerId)?.name ||
+                                          'Ruta';
+                                        return (
+                                          <div
+                                            key={`${cell.dateStr}-${sid}`}
+                                            className="flex items-center gap-0.5 rounded bg-slate-100 px-1 py-0.5"
+                                          >
+                                            <span className="truncate text-[9px] font-bold text-slate-700 flex-1 min-w-0">
+                                              {label}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-red-100 hover:text-red-600"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                removePlacementFromDate(cell.dateStr, sid);
+                                              }}
+                                              aria-label="Quitar"
+                                            >
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                  <Button type="button" variant="secondary" onClick={applyWeeklyPatternToPlacements}>
+                    Rellenar con patrón semanal
+                  </Button>
+                  <Button
+                    type="button"
+                    className="flex-1 sm:flex-none min-w-[140px]"
+                    onClick={savePlanFromCalendar}
+                    disabled={isSavingPlan}
+                    isLoading={isSavingPlan}
+                  >
+                    Guardar plan
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setPlanCalendarOpen(false)}>
+                    Cerrar sin guardar
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
         )}
 
       </div>
