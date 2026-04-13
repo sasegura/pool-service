@@ -45,7 +45,9 @@ export default function ClientDashboard() {
     // Fetch pools owned by this client
     const qPools = query(collection(db, 'pools'), where('clientId', '==', user.uid));
     const unsubPools = onSnapshot(qPools, (snap) => {
+      console.log(`ClientDashboard: Querying pools for ClientID: ${user.uid}`);
       const poolsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Pool));
+      console.log(`ClientDashboard: Found ${poolsData.length} pools`);
       setPools(poolsData);
       
       if (poolsData.length > 0) {

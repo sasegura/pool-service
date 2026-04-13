@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, Timestamp, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
-import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon } from 'lucide-react';
-import { format } from 'date-fns';
+import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle } from 'lucide-react';
+import { format, isWithinInterval, parseISO, getDay, addDays, startOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
@@ -26,6 +27,11 @@ interface Route {
   poolIds: string[];
   status: 'pending' | 'in-progress' | 'completed';
   date?: string;
+  startDate?: string;
+  endDate?: string;
+  recurrence?: 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly';
+  daysOfWeek?: number[];
+  assignedDay?: number;
   workerId?: string;
   routeName?: string;
   startTime?: string;
@@ -33,75 +39,133 @@ interface Route {
   completedPools?: string[];
   lastPoolId?: string;
   lastStatus?: 'ok' | 'issue';
+  templateId?: string;
 }
 
 export default function WorkerDashboard() {
   const { user, loading: authLoading } = useAuth();
+  const { t } = useTranslation();
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [hasOtherRoutes, setHasOtherRoutes] = useState(false);
   const [pools, setPools] = useState<Record<string, Pool>>({});
   const [loading, setLoading] = useState(true);
+  const [allMyRoutes, setAllMyRoutes] = useState<Route[]>([]);
+  const [showAllRoutes, setShowAllRoutes] = useState(false);
   const [activePoolIndex, setActivePoolIndex] = useState<number | null>(null);
   const [visitStatus, setVisitStatus] = useState<'idle' | 'arrived'>('idle');
   const [incidenceMode, setIncidenceMode] = useState(false);
   const [notes, setNotes] = useState('');
   const [notifyClient, setNotifyClient] = useState(true);
 
+  const isRouteActiveToday = (route: Route, dateStr: string) => {
+    const targetDate = startOfDay(parseISO(dateStr));
+    const dayOfWeek = getDay(targetDate);
+
+    // 1. Specific date route
+    if (route.date === dateStr) return true;
+
+    // 2. Weekly Plan assignment (assignedDay)
+    if (route.assignedDay !== undefined && route.assignedDay === dayOfWeek) {
+      return true;
+    }
+
+    // 3. Scheduled route (Range + Recurrence)
+    if (route.startDate && route.endDate) {
+      const start = startOfDay(parseISO(route.startDate));
+      const end = startOfDay(parseISO(route.endDate));
+
+      if (isWithinInterval(targetDate, { start, end })) {
+        if (!route.recurrence || route.recurrence === 'none') return true;
+        
+        if (route.recurrence === 'daily') return true;
+        
+        if (route.recurrence === 'weekly' && route.daysOfWeek) {
+          return route.daysOfWeek.includes(dayOfWeek);
+        }
+
+        if (route.recurrence === 'bi-weekly') {
+          const diffDays = Math.floor((targetDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+          return (diffDays % 14) === 0;
+        }
+
+        if (route.recurrence === 'monthly') {
+          return targetDate.getDate() === start.getDate();
+        }
+      }
+    }
+
+    return false;
+  };
+
   useEffect(() => {
-    if (authLoading || !user) return;
+    if (authLoading || !user?.uid) return;
 
     const today = format(new Date(), 'yyyy-MM-dd');
-    const q = query(
-      collection(db, 'routes'),
-      where('workerId', '==', user.uid),
-      where('date', '==', today)
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      if (!snapshot.empty) {
-        const routeData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Route;
-        setTodayRoute(routeData);
-
-        // Fetch pool details efficiently
-        const poolIds = routeData.poolIds;
-        const poolMap: Record<string, Pool> = {};
-        
-        if (poolIds.length > 0) {
-          const poolsSnap = await getDocs(collection(db, 'pools'));
-          poolsSnap.forEach(d => {
-            if (poolIds.includes(d.id)) {
-              poolMap[d.id] = { id: d.id, ...d.data() } as Pool;
-            }
-          });
-        }
-        setPools(poolMap);
+    const userUid = user.uid;
+    
+    // Listen for ALL routes to handle templates, weekly plans and daily instances
+    const unsubRoutes = onSnapshot(collection(db, 'routes'), async (snapshot) => {
+      const allRoutes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Route));
+      setAllMyRoutes(allRoutes.filter(r => r.workerId === userUid));
+      
+      // 1. Find a specific daily instance for today
+      const dailyInstance = allRoutes.find(r => r.workerId === userUid && r.date === today);
+      
+      if (dailyInstance) {
+        setTodayRoute(dailyInstance);
       } else {
-        setTodayRoute(null);
-        // Fetch available routes (no date and (no worker or is me))
-        const qAvailable = query(
-          collection(db, 'routes'),
-          where('date', '==', '')
-        );
-        const unsubAvailable = onSnapshot(qAvailable, (snap) => {
-          const routes = snap.docs
-            .map(d => ({ id: d.id, ...d.data() } as Route))
-            .filter(r => !r.workerId || r.workerId === user.uid);
-          setAvailableRoutes(routes);
-        });
-
-        // Check if there are routes for other days
-        const allRoutesQ = query(collection(db, 'routes'), where('workerId', '==', user.uid));
-        const allRoutesSnap = await getDocs(allRoutesQ);
-        setHasOtherRoutes(!allRoutesSnap.empty);
-        
-        return () => unsubAvailable();
+        // 2. Look for a weekly/scheduled assignment
+        const assignedRoute = allRoutes.find(r => r.workerId === userUid && isRouteActiveToday(r, today));
+        if (assignedRoute) {
+          // Virtual route: needs instantiation
+          setTodayRoute({
+            ...assignedRoute,
+            status: 'pending',
+            completedPools: [],
+            startTime: undefined,
+            endTime: undefined,
+            lastPoolId: undefined,
+            lastStatus: undefined,
+            date: today,
+            isVirtual: true
+          } as any);
+        } else {
+          setTodayRoute(null);
+        }
       }
+
+      // 3. Available routes (templates or unassigned for today)
+      const available = allRoutes.filter(r => {
+        const isTemplate = !r.date && !r.startDate && !r.assignedDay;
+        const isUnassignedToday = r.date === today && !r.workerId;
+        return (isTemplate || isUnassignedToday) && (!r.workerId || r.workerId === userUid);
+      });
+      setAvailableRoutes(available);
+      
+      setHasOtherRoutes(allRoutes.some(r => r.workerId === userUid && r.date !== today));
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching routes:", error);
       setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, [user]);
+    // Listen for all pools to have them ready
+    const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
+      const poolMap: Record<string, Pool> = {};
+      snap.docs.forEach(d => {
+        poolMap[d.id] = { id: d.id, ...d.data() } as Pool;
+      });
+      setPools(poolMap);
+    }, (error) => {
+      console.error("Error fetching pools:", error);
+    });
+
+    return () => {
+      unsubRoutes();
+      unsubPools();
+    };
+  }, [user?.uid, authLoading]);
 
   useEffect(() => {
     if (!user || !todayRoute || todayRoute.status !== 'in-progress') return;
@@ -138,13 +202,24 @@ export default function WorkerDashboard() {
 
   const handlePickRoute = async (routeId: string) => {
     const today = format(new Date(), 'yyyy-MM-dd');
+    const sourceRoute = availableRoutes.find(r => r.id === routeId);
+    if (!sourceRoute) return;
+
     try {
-      await updateDoc(doc(db, 'routes', routeId), {
+      // Create a NEW instance for today instead of modifying the template
+      const newRouteInstance = {
+        ...sourceRoute,
         workerId: user?.uid,
         date: today,
-        status: 'pending'
-      });
-      toast.success('Ruta asignada correctamente');
+        status: 'pending',
+        completedPools: [],
+        templateId: routeId,
+        createdAt: serverTimestamp()
+      };
+      delete (newRouteInstance as any).id; // Remove template ID
+
+      await addDoc(collection(db, 'routes'), newRouteInstance);
+      toast.success('Ruta asignada para hoy');
     } catch (e) {
       toast.error('Error al asignar la ruta');
     }
@@ -152,11 +227,33 @@ export default function WorkerDashboard() {
 
   const handleStartDay = async () => {
     if (!todayRoute) return;
-    await updateDoc(doc(db, 'routes', todayRoute.id), { 
-      status: 'in-progress',
-      startTime: todayRoute.startTime || new Date().toISOString()
-    });
-    toast.info(todayRoute.status === 'completed' ? 'Jornada reanudada' : 'Jornada iniciada');
+    
+    try {
+      if ((todayRoute as any).isVirtual) {
+        // Instantiate the weekly/scheduled route for today
+        const newInstance = {
+          ...todayRoute,
+          status: 'in-progress',
+          startTime: new Date().toISOString(),
+          completedPools: [],
+          templateId: todayRoute.id,
+          createdAt: serverTimestamp()
+        };
+        delete (newInstance as any).id;
+        delete (newInstance as any).isVirtual;
+
+        await addDoc(collection(db, 'routes'), newInstance);
+        toast.success('Jornada iniciada (Nueva instancia diaria)');
+      } else {
+        await updateDoc(doc(db, 'routes', todayRoute.id), { 
+          status: 'in-progress',
+          startTime: todayRoute.startTime || new Date().toISOString()
+        });
+        toast.info(todayRoute.status === 'completed' ? 'Jornada reanudada' : 'Jornada iniciada');
+      }
+    } catch (e) {
+      toast.error('Error al iniciar jornada');
+    }
   };
 
   const handleEndDay = async () => {
@@ -225,7 +322,12 @@ export default function WorkerDashboard() {
     window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
   };
 
-  if (loading) return <div className="p-8 text-center">Cargando ruta...</div>;
+  if (authLoading || loading) return <div className="p-12 text-center flex flex-col items-center gap-4">
+    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+    <p className="text-slate-500 font-medium">Cargando tu jornada...</p>
+  </div>;
+
+  if (!user) return <div className="p-12 text-center text-red-500 font-bold">Error: Usuario no encontrado</div>;
 
   if (!todayRoute) {
     return (
@@ -262,23 +364,64 @@ export default function WorkerDashboard() {
             <div className="bg-slate-100 p-6 rounded-full mb-6">
               <Clock className="w-12 h-12 text-slate-400" />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">No tienes ruta asignada hoy</h2>
+            <h2 className="text-xl font-bold text-slate-900 mb-2">{t('worker.noRouteToday')}</h2>
             {hasOtherRoutes ? (
-              <p className="text-slate-500">Tienes rutas asignadas para otros días, pero ninguna para hoy ({format(new Date(), 'dd/MM/yyyy')}).</p>
+              <div className="space-y-4 w-full max-w-md">
+                <p className="text-slate-500">Tienes rutas asignadas para otros días, pero ninguna para hoy ({format(new Date(), 'dd/MM/yyyy')}).</p>
+                <Button variant="outline" onClick={() => setShowAllRoutes(!showAllRoutes)} className="w-full">
+                  {showAllRoutes ? 'Ocultar otras rutas' : 'Ver mis rutas de otros días'}
+                </Button>
+                {showAllRoutes && (
+                  <div className="grid gap-2 text-left">
+                    {allMyRoutes.filter(r => r.date !== format(new Date(), 'yyyy-MM-dd')).map(r => (
+                      <div key={r.id} className="p-3 bg-white border rounded-lg text-sm flex justify-between items-center shadow-sm">
+                        <div>
+                          <div className="font-bold text-slate-900">{r.routeName || 'Ruta'}</div>
+                          <div className="text-xs text-slate-500">{r.date || 'Sin fecha'} • {r.poolIds.length} piscinas</div>
+                        </div>
+                        <Button size="sm" onClick={() => handlePickRoute(r.id)} className="h-8 px-3 text-xs">Traer a hoy</Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <p className="text-slate-500">No hay rutas disponibles para elegir en este momento.</p>
             )}
-            <p className="text-xs text-slate-400 mt-4 italic">ID de Usuario: {user.uid}</p>
+            
+            <div className="mt-12 p-4 bg-slate-50 rounded-xl border border-slate-200 text-left w-full max-w-md">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Información de Diagnóstico</h4>
+              <div className="space-y-2 text-[10px] font-mono text-slate-500">
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span>Mi UID:</span>
+                  <span className="text-slate-900 font-bold">{user.uid}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span>Fecha Hoy:</span>
+                  <span className="text-slate-900 font-bold">{format(new Date(), 'yyyy-MM-dd')}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span>Rutas totales:</span>
+                  <span className="text-slate-900 font-bold">{allMyRoutes.length}</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
     );
   }
 
-  if (!GOOGLE_MAPS_API_KEY) {
+  const isInvalidKey = !GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'MY_GOOGLE_MAPS_API_KEY';
+
+  if (isInvalidKey) {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
+        <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
         <h2 className="text-xl font-bold text-amber-900 mb-2">Falta la API Key de Google Maps</h2>
+        <p className="text-sm text-amber-700">
+          Por favor, configura tu <strong>VITE_GOOGLE_MAPS_API_KEY</strong> en el panel de Secretos de AI Studio para habilitar el seguimiento de rutas.
+        </p>
       </div>
     );
   }
@@ -288,7 +431,7 @@ export default function WorkerDashboard() {
       <div className="space-y-6">
         <header className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-black text-slate-900">Mi Ruta</h2>
+            <h2 className="text-2xl font-black text-slate-900">{t('worker.myRoute')}</h2>
             <p className="text-slate-500">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</p>
           </div>
           <div className="flex gap-2">

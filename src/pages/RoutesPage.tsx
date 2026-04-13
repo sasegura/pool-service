@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, doc, deleteDoc, query, updateDoc } from
 import { db } from '../lib/firebase';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
-import { Plus, Calendar, Trash2, Map as MapIcon, List, AlertCircle, Edit2, Sparkles, Loader2 } from 'lucide-react';
+import { Plus, Calendar, Trash2, Map as MapIcon, List, AlertCircle, Edit2, Sparkles, Loader2, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
@@ -29,9 +29,16 @@ interface Route {
   id: string;
   workerId?: string;
   date?: string;
+  startDate?: string;
+  endDate?: string;
+  recurrence?: 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly';
+  daysOfWeek?: number[];
   routeName?: string;
   poolIds: string[];
   status: 'pending' | 'in-progress' | 'completed';
+  order?: number;
+  assignedDay?: number;
+  createdAt?: string;
 }
 
 import { useAuth } from '../contexts/AuthContext';
@@ -47,10 +54,15 @@ export default function RoutesPage() {
   const [newRoute, setNewRoute] = useState({ 
     workerId: '', 
     date: format(new Date(), 'yyyy-MM-dd'), 
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly',
+    daysOfWeek: [] as number[],
     poolIds: [] as string[],
     routeName: '',
     noDate: false,
-    noWorker: false
+    noWorker: false,
+    isScheduled: false
   });
   const [routeViewMode, setRouteViewMode] = useState<'list' | 'map'>('list');
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -69,7 +81,11 @@ export default function RoutesPage() {
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as Pool)));
     });
     const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
-      setWorkers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Worker)).filter(w => w.role === 'worker'));
+      const users = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      console.log('RoutesPage: Total users in DB:', users.length);
+      const filteredWorkers = users.filter((u: any) => u.role === 'worker' || u.isWorker);
+      console.log('RoutesPage: Filtered workers:', filteredWorkers.map(w => `${w.name} (${w.id})`));
+      setWorkers(filteredWorkers);
     });
     const unsubRoutes = onSnapshot(collection(db, 'routes'), (snap) => {
       setRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() } as Route)));
@@ -89,18 +105,33 @@ export default function RoutesPage() {
       return;
     }
     try {
-      const routeToSave = {
+      const routeToSave: any = {
         poolIds: newRoute.poolIds,
         routeName: newRoute.routeName || '',
         workerId: newRoute.noWorker ? '' : newRoute.workerId,
-        date: newRoute.noDate ? '' : newRoute.date,
         status: 'pending'
       };
+
+      if (newRoute.isScheduled) {
+        routeToSave.startDate = newRoute.startDate;
+        routeToSave.endDate = newRoute.endDate;
+        routeToSave.recurrence = newRoute.recurrence;
+        routeToSave.daysOfWeek = newRoute.daysOfWeek;
+        routeToSave.date = ''; // Clear specific date if scheduled
+      } else {
+        routeToSave.date = newRoute.noDate ? '' : newRoute.date;
+        routeToSave.recurrence = 'none';
+      }
+
+      console.log('RoutesPage: Saving route:', routeToSave);
 
       if (editingRouteId) {
         await updateDoc(doc(db, 'routes', editingRouteId), routeToSave);
         toast.success('Ruta actualizada');
       } else {
+        const templatesCount = routes.filter(r => !r.date && !r.startDate).length;
+        routeToSave.createdAt = new Date().toISOString();
+        routeToSave.order = templatesCount;
         await addDoc(collection(db, 'routes'), routeToSave);
         toast.success('Ruta guardada');
       }
@@ -123,10 +154,15 @@ export default function RoutesPage() {
     setNewRoute({ 
       workerId: route.workerId || '', 
       date: route.date || format(new Date(), 'yyyy-MM-dd'), 
+      startDate: route.startDate || format(new Date(), 'yyyy-MM-dd'),
+      endDate: route.endDate || format(new Date(), 'yyyy-MM-dd'),
+      recurrence: route.recurrence || 'none',
+      daysOfWeek: route.daysOfWeek || [],
       poolIds: route.poolIds,
       routeName: route.routeName || '',
-      noDate: !route.date,
-      noWorker: !route.workerId
+      noDate: !route.date && !route.startDate,
+      noWorker: !route.workerId,
+      isScheduled: !!route.startDate
     });
     setEditingRouteId(route.id);
     setShowRouteForm(true);
@@ -183,6 +219,55 @@ export default function RoutesPage() {
     }
   };
 
+  const movePool = (index: number, direction: 'up' | 'down') => {
+    setNewRoute(prev => {
+      const newPoolIds = [...prev.poolIds];
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= newPoolIds.length) return prev;
+      
+      const temp = newPoolIds[index];
+      newPoolIds[index] = newPoolIds[targetIndex];
+      newPoolIds[targetIndex] = temp;
+      
+      return { ...prev, poolIds: newPoolIds };
+    });
+  };
+
+  const moveRouteTemplate = async (index: number, direction: 'up' | 'down') => {
+    const templates = routes
+      .filter(r => !r.date && !r.startDate)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= templates.length) return;
+
+    const current = templates[index];
+    const target = templates[targetIndex];
+
+    try {
+      await updateDoc(doc(db, 'routes', current.id), { order: targetIndex });
+      await updateDoc(doc(db, 'routes', target.id), { order: index });
+      toast.success('Orden actualizado');
+    } catch (e) {
+      toast.error('Error al reordenar');
+    }
+  };
+
+  const assignRouteToDay = async (routeId: string, day: number) => {
+    try {
+      // Clear previous assignment for this day if any
+      const existing = routes.find(r => r.assignedDay === day);
+      if (existing && existing.id !== routeId) {
+        await updateDoc(doc(db, 'routes', existing.id), { assignedDay: null });
+      }
+      
+      await updateDoc(doc(db, 'routes', routeId), { assignedDay: day });
+      toast.success('Día asignado');
+    } catch (e) {
+      toast.error('Error al asignar día');
+    }
+  };
+
   if (!GOOGLE_MAPS_API_KEY) {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
@@ -203,10 +288,15 @@ export default function RoutesPage() {
             setNewRoute({ 
               workerId: '', 
               date: format(new Date(), 'yyyy-MM-dd'), 
+              startDate: format(new Date(), 'yyyy-MM-dd'),
+              endDate: format(new Date(), 'yyyy-MM-dd'),
+              recurrence: 'none',
+              daysOfWeek: [],
               poolIds: [], 
               routeName: '',
               noDate: false,
-              noWorker: false
+              noWorker: false,
+              isScheduled: false
             });
           }} className="gap-1">
             <Plus className="w-4 h-4" /> Nueva Ruta
@@ -229,10 +319,136 @@ export default function RoutesPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
+              <div className="flex items-center gap-4 p-3 bg-white rounded-xl border border-blue-100 mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={newRoute.isScheduled}
+                    onChange={e => setNewRoute({...newRoute, isScheduled: e.target.checked})}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-bold text-slate-700">Habilitar Planificación (Ruta Recurrente)</span>
+                </label>
+              </div>
+
+              {newRoute.isScheduled ? (
+                <div className="space-y-4 p-4 bg-white rounded-xl border border-blue-100 mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha Inicio</label>
+                      <input 
+                        type="date" 
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={newRoute.startDate}
+                        onChange={e => setNewRoute({...newRoute, startDate: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha Fin</label>
+                      <input 
+                        type="date" 
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={newRoute.endDate}
+                        onChange={e => setNewRoute({...newRoute, endDate: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Recurrencia</label>
+                    <select 
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                      value={newRoute.recurrence}
+                      onChange={e => setNewRoute({...newRoute, recurrence: e.target.value as any})}
+                    >
+                      <option value="none">Sin repetición (Rango de fechas)</option>
+                      <option value="daily">Diaria</option>
+                      <option value="weekly">Semanal</option>
+                      <option value="bi-weekly">Quincenal</option>
+                      <option value="monthly">Mensual</option>
+                    </select>
+                  </div>
+
+                  {newRoute.recurrence === 'weekly' && (
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Días de la semana</label>
+                      <div className="flex flex-wrap gap-2">
+                        {['D', 'L', 'M', 'X', 'J', 'V', 'S'].map((day, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => {
+                              const current = newRoute.daysOfWeek;
+                              const next = current.includes(i) ? current.filter(d => d !== i) : [...current, i];
+                              setNewRoute({...newRoute, daysOfWeek: next});
+                            }}
+                            className={cn(
+                              "w-8 h-8 rounded-lg text-xs font-bold transition-all",
+                              newRoute.daysOfWeek.includes(i) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            )}
+                          >
+                            {day}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-500 uppercase">Trabajador</label>
+                      <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={newRoute.noWorker} 
+                          onChange={e => setNewRoute({...newRoute, noWorker: e.target.checked})}
+                          className="rounded border-slate-300"
+                        /> Sin asignar
+                      </label>
+                    </div>
+                    <select 
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                      value={newRoute.workerId}
+                      onChange={e => setNewRoute({...newRoute, workerId: e.target.value})}
+                      disabled={newRoute.noWorker}
+                    >
+                      <option value="">Seleccionar...</option>
+                      {workers.map(w => (
+                        <option key={w.id} value={w.id}>
+                          {w.name} {w.id === user.uid ? '(Tú)' : ''} - {w.id.substring(0, 6)}...
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-500 uppercase">Fecha</label>
+                      <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={newRoute.noDate} 
+                          onChange={e => setNewRoute({...newRoute, noDate: e.target.checked})}
+                          className="rounded border-slate-300"
+                        /> Sin fecha
+                      </label>
+                    </div>
+                    <input 
+                      type="date" 
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                      value={newRoute.date}
+                      onChange={e => setNewRoute({...newRoute, date: e.target.value})}
+                      disabled={newRoute.noDate}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {newRoute.isScheduled && (
+                <div className="space-y-2 mb-4">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold text-slate-500 uppercase">Trabajador</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase">Trabajador Asignado</label>
                     <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
                       <input 
                         type="checkbox" 
@@ -249,30 +465,14 @@ export default function RoutesPage() {
                     disabled={newRoute.noWorker}
                   >
                     <option value="">Seleccionar...</option>
-                    {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    {workers.map(w => (
+                      <option key={w.id} value={w.id}>
+                        {w.name} {w.id === user.uid ? '(Tú)' : ''} - {w.id.substring(0, 6)}...
+                      </option>
+                    ))}
                   </select>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold text-slate-500 uppercase">Fecha</label>
-                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={newRoute.noDate} 
-                        onChange={e => setNewRoute({...newRoute, noDate: e.target.checked})}
-                        className="rounded border-slate-300"
-                      /> Sin fecha
-                    </label>
-                  </div>
-                  <input 
-                    type="date" 
-                    className="w-full rounded-lg border-slate-200 p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                    value={newRoute.date}
-                    onChange={e => setNewRoute({...newRoute, date: e.target.value})}
-                    disabled={newRoute.noDate}
-                  />
-                </div>
-              </div>
+              )}
 
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-500 uppercase">Selección de Piscinas (Orden de parada)</label>
@@ -310,39 +510,75 @@ export default function RoutesPage() {
               </div>
 
               {routeViewMode === 'list' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-white rounded-lg border border-slate-200">
-                  {pools.map(p => {
-                    const assignedTo = getAssignedRoute(p.id);
-                    const isSelected = newRoute.poolIds.includes(p.id);
-                    
-                    return (
-                      <label key={p.id} className={cn(
-                        "flex items-center gap-2 text-sm p-2 rounded-lg cursor-pointer transition-colors relative",
-                        isSelected ? "bg-blue-50 border-blue-200 border" : "bg-slate-50 border-transparent border",
-                        assignedTo && !isSelected ? "opacity-60" : ""
-                      )}>
-                        <input 
-                          type="checkbox" 
-                          className="hidden"
-                          checked={isSelected}
-                          onChange={() => togglePoolInRoute(p.id)}
-                        />
-                        <div className="flex-1">
-                          <div className="font-bold flex items-center justify-between">
-                            <span>{p.name}</span>
-                            {assignedTo && (
-                              <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                <AlertCircle className="w-2.5 h-2.5" /> {assignedTo}
-                              </span>
-                            )}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-white rounded-lg border border-slate-200">
+                    {pools.map(p => {
+                      const assignedTo = getAssignedRoute(p.id);
+                      const isSelected = newRoute.poolIds.includes(p.id);
+                      
+                      return (
+                        <label key={p.id} className={cn(
+                          "flex items-center gap-2 text-sm p-2 rounded-lg cursor-pointer transition-colors relative",
+                          isSelected ? "bg-blue-50 border-blue-200 border" : "bg-slate-50 border-transparent border",
+                          assignedTo && !isSelected ? "opacity-60" : ""
+                        )}>
+                          <input 
+                            type="checkbox" 
+                            className="hidden"
+                            checked={isSelected}
+                            onChange={() => togglePoolInRoute(p.id)}
+                          />
+                          <div className="flex-1">
+                            <div className="font-bold flex items-center justify-between">
+                              <span>{p.name}</span>
+                              {assignedTo && (
+                                <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                  <AlertCircle className="w-2.5 h-2.5" /> {assignedTo}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          {isSelected && (
-                            <div className="text-[10px] text-blue-600 font-black">PARADA #{newRoute.poolIds.indexOf(p.id) + 1}</div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {newRoute.poolIds.length > 0 && (
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Orden de Paradas (Arrastra o usa flechas)</label>
+                      <div className="space-y-1">
+                        {newRoute.poolIds.map((id, index) => {
+                          const pool = pools.find(p => p.id === id);
+                          return (
+                            <div key={id} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 text-sm">
+                              <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-[10px]">
+                                {index + 1}
+                              </span>
+                              <span className="flex-1 font-medium text-slate-700">{pool?.name || 'Cargando...'}</span>
+                              <div className="flex gap-1">
+                                <button 
+                                  type="button"
+                                  onClick={() => movePool(index, 'up')}
+                                  disabled={index === 0}
+                                  className="p-1 text-slate-400 hover:text-blue-600 disabled:opacity-30"
+                                >
+                                  <ArrowUp className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  type="button"
+                                  onClick={() => movePool(index, 'down')}
+                                  disabled={index === newRoute.poolIds.length - 1}
+                                  className="p-1 text-slate-400 hover:text-blue-600 disabled:opacity-30"
+                                >
+                                  <ArrowDown className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="h-64 rounded-xl overflow-hidden border border-slate-200 relative">
@@ -434,7 +670,53 @@ export default function RoutesPage() {
 
         <div className="grid gap-4">
           <div className="space-y-2">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Rutas Asignadas</h3>
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Planificación / Rutas Recurrentes</h3>
+            {routes.filter(r => r.startDate).map(route => {
+              const worker = workers.find(w => w.id === route.workerId);
+              const isSelected = selectedRouteId === route.id;
+              return (
+                <Card 
+                  key={route.id} 
+                  className={cn(
+                    "p-4 transition-all cursor-pointer border-blue-200",
+                    isSelected ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/30" : "hover:border-blue-300"
+                  )}
+                  onClick={() => setSelectedRouteId(isSelected ? null : route.id)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "p-2 rounded-lg transition-colors",
+                        isSelected ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-600"
+                      )}>
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900">{route.routeName || 'Planificación'}</h4>
+                        <p className="text-xs text-slate-500">
+                          {route.startDate} al {route.endDate} • {route.recurrence === 'none' ? 'Rango' : route.recurrence} • {worker?.name || 'Sin asignar'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <button 
+                        onClick={() => handleEdit(route)} 
+                        className="p-1 text-slate-400 hover:text-blue-600"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => deleteRoute(route.id)} className="p-1 text-slate-400 hover:text-red-600">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Rutas Asignadas (Día único)</h3>
             {routes.filter(r => r.date).map(route => {
               const worker = workers.find(w => w.id === route.workerId);
               const isSelected = selectedRouteId === route.id;
@@ -485,47 +767,109 @@ export default function RoutesPage() {
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Plantillas / Rutas sin fecha</h3>
-            {routes.filter(r => !r.date).map(route => {
-              const worker = workers.find(w => w.id === route.workerId);
-              const isSelected = selectedRouteId === route.id;
-              return (
-                <Card 
-                  key={route.id} 
-                  className={cn(
-                    "p-4 transition-all cursor-pointer border-dashed",
-                    isSelected ? "border-indigo-500 ring-1 ring-indigo-500 bg-indigo-50/30" : "hover:border-indigo-200"
-                  )}
-                  onClick={() => setSelectedRouteId(isSelected ? null : route.id)}
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "p-2 rounded-lg transition-colors",
-                        isSelected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"
-                      )}>
-                        <Sparkles className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-slate-900">{route.routeName || 'Ruta sin nombre'}</h4>
-                        <p className="text-xs text-slate-500">{route.poolIds.length} piscinas • {worker?.name || 'Cualquier técnico puede elegir'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                      <button 
-                        onClick={() => handleEdit(route)} 
-                        className="p-1 text-slate-400 hover:text-blue-600"
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Planificador Semanal</h3>
+            <Card className="p-4 bg-white border-slate-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map((dayName, i) => {
+                  const dayIndex = (i + 1) % 7; // 1=Mon, ..., 6=Sat, 0=Sun
+                  const assignedRoute = routes.find(r => r.assignedDay === dayIndex);
+                  
+                  return (
+                    <div key={dayName} className="flex flex-col gap-1">
+                      <span className="text-[10px] font-black text-slate-400 uppercase text-center">{dayName}</span>
+                      <select 
+                        className={cn(
+                          "text-[10px] p-1.5 rounded-lg border transition-all",
+                          assignedRoute ? "bg-blue-50 border-blue-200 text-blue-700 font-bold" : "bg-slate-50 border-slate-100 text-slate-400"
+                        )}
+                        value={assignedRoute?.id || ''}
+                        onChange={(e) => assignRouteToDay(e.target.value, dayIndex)}
                       >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => deleteRoute(route.id)} className="p-1 text-slate-400 hover:text-red-600">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                        <option value="">Sin ruta</option>
+                        {routes.filter(r => !r.date && !r.startDate).map(r => (
+                          <option key={r.id} value={r.id}>{r.routeName || 'Ruta sin nombre'}</option>
+                        ))}
+                      </select>
                     </div>
-                  </div>
-                </Card>
-              );
-            })}
+                  );
+                })}
+              </div>
+            </Card>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Plantillas / Rutas sin fecha</h3>
+            {routes
+              .filter(r => !r.date && !r.startDate)
+              .sort((a, b) => {
+                if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+                return (a.createdAt || '') > (b.createdAt || '') ? 1 : -1;
+              })
+              .map((route, index, array) => {
+                const worker = workers.find(w => w.id === route.workerId);
+                const isSelected = selectedRouteId === route.id;
+                const assignedDay = route.assignedDay !== undefined ? ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'][route.assignedDay] : null;
+
+                return (
+                  <Card 
+                    key={route.id} 
+                    className={cn(
+                      "p-4 transition-all cursor-pointer border-dashed",
+                      isSelected ? "border-indigo-500 ring-1 ring-indigo-500 bg-indigo-50/30" : "hover:border-indigo-200"
+                    )}
+                    onClick={() => setSelectedRouteId(isSelected ? null : route.id)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "p-2 rounded-lg transition-colors",
+                          isSelected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"
+                        )}>
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-slate-900">{route.routeName || 'Ruta sin nombre'}</h4>
+                            {assignedDay && (
+                              <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black uppercase tracking-tighter">
+                                {assignedDay}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500">{route.poolIds.length} piscinas • {worker?.name || 'Cualquier técnico puede elegir'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                        <div className="flex flex-col gap-1 mr-2">
+                          <button 
+                            onClick={() => moveRouteTemplate(index, 'up')}
+                            disabled={index === 0}
+                            className="p-0.5 text-slate-300 hover:text-blue-600 disabled:opacity-0"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                          <button 
+                            onClick={() => moveRouteTemplate(index, 'down')}
+                            disabled={index === array.length - 1}
+                            className="p-0.5 text-slate-300 hover:text-blue-600 disabled:opacity-0"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <button 
+                          onClick={() => handleEdit(route)} 
+                          className="p-1 text-slate-400 hover:text-blue-600"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => deleteRoute(route.id)} className="p-1 text-slate-400 hover:text-red-600">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
           </div>
         </div>
       </div>

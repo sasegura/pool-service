@@ -3,12 +3,19 @@ import { Outlet, useNavigate, NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { LogOut, Waves, LayoutDashboard, Map as MapIcon, Waves as PoolsIcon, Users } from 'lucide-react';
+import { LogOut, Waves, LayoutDashboard, Map as MapIcon, Waves as PoolsIcon, Users, Languages } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useTranslation } from 'react-i18next';
 
 export default function Layout() {
   const { user, role, setRole } = useAuth();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
+
+  const toggleLanguage = () => {
+    const newLang = i18n.language === 'es' ? 'en' : 'es';
+    i18n.changeLanguage(newLang);
+  };
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -18,10 +25,10 @@ export default function Layout() {
   if (!user) return <Outlet />;
 
   const navItems = [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'worker', 'client'] },
-    { to: '/pools', label: 'Piscinas', icon: PoolsIcon, roles: ['admin'] },
-    { to: '/routes', label: 'Rutas', icon: MapIcon, roles: ['admin'] },
-    { to: '/team', label: 'Equipo', icon: Users, roles: ['admin'] },
+    { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, roles: ['admin', 'worker', 'client'] },
+    { to: '/pools', label: t('nav.pools'), icon: PoolsIcon, roles: ['admin'] },
+    { to: '/routes', label: t('nav.routes'), icon: MapIcon, roles: ['admin'] },
+    { to: '/team', label: t('nav.team'), icon: Users, roles: ['admin'] },
   ];
 
   const filteredNav = navItems.filter(item => item.roles.includes(role as string));
@@ -38,9 +45,16 @@ export default function Layout() {
           </div>
           
           <div className="flex items-center gap-4">
+            <button 
+              onClick={toggleLanguage}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-600"
+            >
+              <Languages className="w-4 h-4" />
+              <span className="uppercase">{i18n.language}</span>
+            </button>
             <div className="flex flex-col items-end">
               <span className="text-sm font-bold text-slate-900">{user.displayName}</span>
-              <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">{role}</span>
+              <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">{t(`common.${role}`)}</span>
             </div>
           </div>
         </div>
@@ -76,7 +90,10 @@ export default function Layout() {
           {(['admin', 'worker', 'client'] as const).map((r) => (
             <button
               key={r}
-              onClick={() => setRole(r)}
+              onClick={() => {
+                setRole(r);
+                navigate('/');
+              }}
               className={cn(
                 "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
                 role === r ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"

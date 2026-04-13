@@ -108,7 +108,7 @@ export default function PoolsPage() {
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as Pool)));
     });
     const unsubClients = onSnapshot(collection(db, 'users'), (snap) => {
-      setClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as Client)).filter(c => c.role === 'client'));
+      setClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as Client)).filter(c => c.role === 'client' || (c as any).isClient));
     });
     return () => {
       unsubPools();
@@ -124,11 +124,18 @@ export default function PoolsPage() {
       }
     }
     try {
+      const poolData = {
+        name: newPool.name,
+        address: newPool.address,
+        clientId: newPool.clientId,
+        coordinates: newPool.coordinates
+      };
+
       if (editingPoolId) {
-        await updateDoc(doc(db, 'pools', editingPoolId), newPool);
+        await updateDoc(doc(db, 'pools', editingPoolId), poolData);
         toast.success('Piscina actualizada');
       } else {
-        await addDoc(collection(db, 'pools'), newPool);
+        await addDoc(collection(db, 'pools'), poolData);
         toast.success('Piscina añadida');
       }
       setNewPool({ name: '', address: '', clientId: '', coordinates: MIAMI_CENTER });
@@ -159,11 +166,16 @@ export default function PoolsPage() {
     }
   };
 
-  if (!GOOGLE_MAPS_API_KEY) {
+  const isInvalidKey = !GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'MY_GOOGLE_MAPS_API_KEY';
+
+  if (isInvalidKey) {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
         <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
         <h2 className="text-xl font-bold text-amber-900 mb-2">Falta la API Key de Google Maps</h2>
+        <p className="text-sm text-amber-700">
+          Por favor, configura tu <strong>VITE_GOOGLE_MAPS_API_KEY</strong> en el panel de Secretos de AI Studio para habilitar los mapas y la geolocalización.
+        </p>
       </div>
     );
   }

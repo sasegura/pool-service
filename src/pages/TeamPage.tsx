@@ -162,6 +162,7 @@ export default function TeamPage() {
               <div>
                 <h4 className="font-bold text-slate-900">{user.name}</h4>
                 <p className="text-xs text-slate-500">{user.email}</p>
+                <p className="text-[9px] text-slate-400 font-mono mt-0.5">ID: {user.id}</p>
                 <span className={cn(
                   "inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase",
                   user.role === 'admin' ? "bg-purple-50 text-purple-700" : 

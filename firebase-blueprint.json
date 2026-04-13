@@ -40,17 +40,27 @@
     },
     "Route": {
       "title": "Route",
-      "description": "Daily route for a worker or a template",
+      "description": "Daily route for a worker or a template with scheduling",
       "type": "object",
       "properties": {
         "routeName": { "type": "string", "description": "Optional name for the route (e.g. 'Ruta Norte')" },
         "workerId": { "type": "string" },
-        "date": { "type": "string", "format": "date" },
+        "date": { "type": "string", "format": "date", "description": "Specific date for single-day routes" },
+        "startDate": { "type": "string", "format": "date", "description": "Start date for scheduled routes" },
+        "endDate": { "type": "string", "format": "date", "description": "End date for scheduled routes" },
+        "recurrence": { "type": "string", "enum": ["none", "daily", "weekly", "bi-weekly", "monthly"] },
+        "daysOfWeek": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 6 },
+          "description": "0=Sun, 1=Mon, etc."
+        },
         "poolIds": {
           "type": "array",
           "items": { "type": "string" }
         },
-        "status": { "type": "string", "enum": ["pending", "in-progress", "completed"] }
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed"] },
+        "order": { "type": "integer", "description": "Display order for templates" },
+        "assignedDay": { "type": "integer", "minimum": 0, "maximum": 6, "description": "Day of week assigned in the weekly plan (0=Sun, 1=Mon...)" }
       },
       "required": ["poolIds"]
     },

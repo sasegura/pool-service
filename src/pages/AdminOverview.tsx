@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, updateDoc, doc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../lib/firebase';
-import { Card } from '../components/ui/Common';
-import { Waves, Users, CheckCircle, AlertCircle, Clock, MapPin, Calendar as CalendarIcon, Navigation } from 'lucide-react';
+import { Card, Button } from '../components/ui/Common';
+import { Waves, Users, CheckCircle, AlertCircle, Clock, MapPin, Calendar as CalendarIcon, Navigation, Edit2, Check, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { toast } from 'sonner';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
@@ -21,6 +22,12 @@ interface Route {
   lastPoolId?: string;
   lastStatus?: 'ok' | 'issue';
   date: string;
+  startDate?: string;
+  endDate?: string;
+  recurrence?: string;
+  assignedDay?: number;
+  startTime?: string;
+  endTime?: string;
 }
 
 interface User {
@@ -37,10 +44,12 @@ interface Pool {
 }
 
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 
 export default function AdminOverview() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+  const { t } = useTranslation();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [poolsCount, setPoolsCount] = useState(0);
   const [workersCount, setWorkersCount] = useState(0);
@@ -49,8 +58,11 @@ export default function AdminOverview() {
   
   const [routes, setRoutes] = useState<Route[]>([]);
   const [users, setUsers] = useState<Record<string, string>>({});
+  const [allWorkers, setAllWorkers] = useState<User[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
   const [liveWorkers, setLiveWorkers] = useState<User[]>([]);
+  const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
+  const [editData, setEditData] = useState({ workerId: '', date: '' });
 
   useEffect(() => {
     if (loading || !user) return;
@@ -64,8 +76,9 @@ export default function AdminOverview() {
     const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
       const workerDocs = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as User))
-        .filter(u => u.role === 'worker');
+        .filter(u => u.role === 'worker' || (u as any).isWorker);
       
+      setAllWorkers(workerDocs);
       setWorkersCount(workerDocs.length);
       setLiveWorkers(workerDocs.filter(w => w.lastLocation));
       
@@ -94,12 +107,30 @@ export default function AdminOverview() {
     };
   }, [selectedDate]);
 
+  const handleStartEdit = (route: Route) => {
+    setEditingRouteId(route.id);
+    setEditData({ workerId: route.workerId, date: route.date });
+  };
+
+  const handleSaveEdit = async (routeId: string) => {
+    try {
+      await updateDoc(doc(db, 'routes', routeId), {
+        workerId: editData.workerId,
+        date: editData.date
+      });
+      setEditingRouteId(null);
+      toast.success('Ruta actualizada');
+    } catch (error) {
+      toast.error('Error al actualizar ruta');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900">Vista General</h2>
-          <p className="text-slate-500 font-medium">Estado actual de la operación en Miami</p>
+          <h2 className="text-2xl font-black text-slate-900">{t('admin.overview')}</h2>
+          <p className="text-slate-500 font-medium">{t('admin.operationStatus')}</p>
         </div>
         <div className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
           <div className="bg-slate-100 p-2 rounded-lg text-slate-500">
@@ -123,7 +154,7 @@ export default function AdminOverview() {
             <Waves className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xs font-bold text-blue-600 uppercase mb-1">Total Piscinas</div>
+            <div className="text-xs font-bold text-blue-600 uppercase mb-1">{t('nav.pools')}</div>
             <div className="text-3xl font-black text-blue-900">{poolsCount}</div>
           </div>
         </Card>
@@ -136,7 +167,7 @@ export default function AdminOverview() {
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xs font-bold text-slate-600 uppercase mb-1">Personal Activo</div>
+            <div className="text-xs font-bold text-slate-600 uppercase mb-1">{t('nav.team')}</div>
             <div className="text-3xl font-black text-slate-900">{workersCount}</div>
           </div>
         </Card>
@@ -149,7 +180,7 @@ export default function AdminOverview() {
             <CheckCircle className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xs font-bold text-emerald-600 uppercase mb-1">Completados</div>
+            <div className="text-xs font-bold text-emerald-600 uppercase mb-1">{t('common.completed')}</div>
             <div className="text-3xl font-black text-emerald-900">{completedCount}</div>
           </div>
         </Card>
@@ -162,7 +193,7 @@ export default function AdminOverview() {
             <AlertCircle className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xs font-bold text-red-600 uppercase mb-1">Incidencias</div>
+            <div className="text-xs font-bold text-red-600 uppercase mb-1">{t('nav.incidents')}</div>
             <div className="text-3xl font-black text-red-900">{incidentsCount}</div>
           </div>
         </Card>
@@ -173,7 +204,7 @@ export default function AdminOverview() {
           <Card className="overflow-hidden border-slate-200">
             <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">Estado de Rutas</h3>
+                <h3 className="text-lg font-bold text-slate-900">{t('admin.routeStatus')}</h3>
                 <p className="text-xs text-slate-500">
                   {selectedDate === format(new Date(), 'yyyy-MM-dd') 
                     ? 'Progreso en tiempo real de todas las rutas activas hoy' 
@@ -188,11 +219,11 @@ export default function AdminOverview() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-[10px] uppercase tracking-wider font-bold text-slate-500 border-b border-slate-100">
-                    <th className="px-6 py-3">Técnico</th>
+                    <th className="px-6 py-3">{t('common.worker')}</th>
                     <th className="px-6 py-3">Horario</th>
                     <th className="px-6 py-3">Última Parada</th>
                     <th className="px-6 py-3">Progreso</th>
-                    <th className="px-6 py-3">Estado</th>
+                    <th className="px-6 py-3">{t('common.status')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -206,26 +237,48 @@ export default function AdminOverview() {
                     routes.map(route => {
                       const progress = Math.round(((route.completedPools?.length || 0) / route.poolIds.length) * 100);
                       const isIncident = route.lastStatus === 'issue';
+                      const isEditing = editingRouteId === route.id;
                       
                       return (
                         <tr key={route.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
-                                {users[route.workerId]?.charAt(0) || '?'}
+                            {isEditing ? (
+                              <select 
+                                className="text-sm rounded-lg border-slate-200 p-1 w-full"
+                                value={editData.workerId}
+                                onChange={e => setEditData({...editData, workerId: e.target.value})}
+                              >
+                                {allWorkers.map(w => (
+                                  <option key={w.id} value={w.id}>{w.name}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
+                                  {users[route.workerId]?.charAt(0) || '?'}
+                                </div>
+                                <span className="text-sm font-bold text-slate-700">{users[route.workerId] || 'Cargando...'}</span>
                               </div>
-                              <span className="text-sm font-bold text-slate-700">{users[route.workerId] || 'Cargando...'}</span>
-                            </div>
+                            )}
                           </td>
                           <td className="px-6 py-4">
-                            <div className="flex flex-col text-[11px] font-mono text-slate-500">
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" /> {route.startTime ? format(new Date(route.startTime), 'HH:mm') : '--:--'}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <CheckCircle className="w-3 h-3" /> {route.endTime ? format(new Date(route.endTime), 'HH:mm') : '--:--'}
-                              </span>
-                            </div>
+                            {isEditing ? (
+                              <input 
+                                type="date"
+                                className="text-sm rounded-lg border-slate-200 p-1 w-full"
+                                value={editData.date}
+                                onChange={e => setEditData({...editData, date: e.target.value})}
+                              />
+                            ) : (
+                              <div className="flex flex-col text-[11px] font-mono text-slate-500">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" /> {route.startTime ? format(new Date(route.startTime), 'HH:mm') : '--:--'}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" /> {route.endTime ? format(new Date(route.endTime), 'HH:mm') : '--:--'}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -250,15 +303,31 @@ export default function AdminOverview() {
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className={cn(
-                              "px-2 py-1 rounded text-[10px] font-bold uppercase",
-                              route.status === 'completed' ? "bg-emerald-100 text-emerald-700" :
-                              isIncident ? "bg-red-100 text-red-700" :
-                              route.status === 'in-progress' ? "bg-blue-100 text-blue-700" :
-                              "bg-slate-100 text-slate-600"
-                            )}>
-                              {isIncident ? 'Incidencia' : route.status}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                                route.status === 'completed' ? "bg-emerald-100 text-emerald-700" :
+                                isIncident ? "bg-red-100 text-red-700" :
+                                route.status === 'in-progress' ? "bg-blue-100 text-blue-700" :
+                                "bg-slate-100 text-slate-600"
+                              )}>
+                                {isIncident ? 'Incidencia' : route.status}
+                              </span>
+                              {isEditing ? (
+                                <div className="flex gap-1">
+                                  <button onClick={() => handleSaveEdit(route.id)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded">
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={() => setEditingRouteId(null)} className="p-1 text-red-600 hover:bg-red-50 rounded">
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button onClick={() => handleStartEdit(route)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -278,7 +347,7 @@ export default function AdminOverview() {
               </h3>
             </div>
             <div className="h-[400px] relative">
-              {GOOGLE_MAPS_API_KEY ? (
+              {GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY' ? (
                 <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
                   <Map
                     defaultCenter={MIAMI_CENTER}
@@ -305,8 +374,10 @@ export default function AdminOverview() {
                   </Map>
                 </APIProvider>
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-50 text-slate-400 text-xs text-center p-8">
-                  Configura GOOGLE_MAPS_API_KEY para ver el mapa de seguimiento
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-slate-400 text-xs text-center p-8">
+                  <AlertCircle className="w-8 h-8 mb-2 text-amber-500" />
+                  <p className="font-bold text-slate-600 mb-1">Mapa Deshabilitado</p>
+                  <p>Configura <strong>VITE_GOOGLE_MAPS_API_KEY</strong> en Secretos para ver el seguimiento en tiempo real.</p>
                 </div>
               )}
             </div>
