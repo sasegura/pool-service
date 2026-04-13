@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PoolRecord } from '../../../types/pool';
 import type { ClientDirectoryEntry, PoolsDirectoryRepository } from '../ports';
-import { poolsDirectoryRepositoryFirestore } from '../repositories/poolsDirectoryRepositoryFirestore';
+import { createPoolsDirectoryRepositoryFirestore } from '../repositories/poolsDirectoryRepositoryFirestore';
 
-export function usePoolsDirectory(
-  enabled: boolean,
-  repository: PoolsDirectoryRepository = poolsDirectoryRepositoryFirestore
-) {
+export function usePoolsDirectory(enabled: boolean, companyId: string | undefined) {
   const [pools, setPools] = useState<PoolRecord[]>([]);
   const [clients, setClients] = useState<ClientDirectoryEntry[]>([]);
 
+  const repository = useMemo(
+    () => (companyId ? createPoolsDirectoryRepositoryFirestore(companyId) : null),
+    [companyId]
+  );
+
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !repository) return;
     const unsubPools = repository.subscribePools(setPools);
     const unsubClients = repository.subscribeClientUsers(setClients);
     return () => {
@@ -20,5 +22,5 @@ export function usePoolsDirectory(
     };
   }, [enabled, repository]);
 
-  return { pools, clients, repository };
+  return { pools, clients, repository: repository as PoolsDirectoryRepository | null };
 }

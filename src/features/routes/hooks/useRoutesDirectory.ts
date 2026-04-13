@@ -6,24 +6,24 @@ import {
   subscribeRoutesWorkers,
 } from '../repositories/routesDirectoryRepositoryFirestore';
 
-export function useRoutesDirectory(enabled: boolean) {
+export function useRoutesDirectory(enabled: boolean, companyId: string | undefined) {
   const [pools, setPools] = useState<RoutesPool[]>([]);
   const [workers, setWorkers] = useState<RoutesWorker[]>([]);
   const [routes, setRoutes] = useState<RouteDocument[]>([]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !companyId) return;
 
-    const unsubPools = subscribeRoutesPools(setPools);
-    const unsubUsers = subscribeRoutesWorkers(setWorkers);
-    const unsubRoutes = subscribeAllRoutesDocuments(setRoutes);
+    const unsubPools = subscribeRoutesPools(companyId, setPools);
+    const unsubUsers = subscribeRoutesWorkers(companyId, setWorkers);
+    const unsubRoutes = subscribeAllRoutesDocuments(companyId, setRoutes);
 
     return () => {
       unsubPools();
       unsubUsers();
       unsubRoutes();
     };
-  }, [enabled]);
+  }, [enabled, companyId]);
 
   return { pools, workers, routes };
 }

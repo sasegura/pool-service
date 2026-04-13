@@ -43,7 +43,7 @@ function AdminOverviewTrackingMap({ workers }: { workers: User[] }) {
 
 export default function AdminOverview() {
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { user, loading, companyId } = useAuth();
   const { t } = useTranslation();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const {
@@ -56,7 +56,7 @@ export default function AdminOverview() {
     allWorkers,
     pools,
     liveWorkers,
-  } = useAdminOverviewData(selectedDate, !loading && !!user);
+  } = useAdminOverviewData(selectedDate, !loading && !!user, companyId ?? undefined);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ workerId: '', date: '' });
 
@@ -66,8 +66,9 @@ export default function AdminOverview() {
   };
 
   const handleSaveEdit = async (routeId: string) => {
+    if (!companyId) return;
     try {
-      await updateDoc(doc(db, 'routes', routeId), {
+      await updateDoc(doc(db, 'companies', companyId, 'routes', routeId), {
         workerId: editData.workerId,
         date: editData.date
       });

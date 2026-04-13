@@ -113,7 +113,7 @@ function WorkerRouteMap({
 }
 
 export default function WorkerDashboard() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, companyId } = useAuth();
   const { t, i18n } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const authUid = auth.currentUser?.uid ?? user?.uid;
@@ -190,12 +190,12 @@ export default function WorkerDashboard() {
   };
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || !companyId) return;
 
     const today = format(new Date(), 'yyyy-MM-dd');
     
     // Listen for ALL routes to handle templates, weekly plans and daily instances
-    const unsubRoutes = subscribeAllRoutes(async (snapshot) => {
+    const unsubRoutes = subscribeAllRoutes(companyId, async (snapshot) => {
       const allRoutes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Route));
       setAllMyRoutes(allRoutes.filter(r => isMyWorkerRoute(r.workerId)));
       
@@ -240,7 +240,7 @@ export default function WorkerDashboard() {
     });
 
     // Listen for all pools to have them ready
-    const unsubPools = subscribeAllPools((snap) => {
+    const unsubPools = subscribeAllPools(companyId, (snap) => {
       const poolMap: Record<string, PoolRecord> = {};
       snap.docs.forEach(d => {
         poolMap[d.id] = poolDocToRecord(d.id, d.data());
@@ -254,7 +254,7 @@ export default function WorkerDashboard() {
       unsubRoutes();
       unsubPools();
     };
-  }, [authLoading, authUid, user?.uid]);
+  }, [authLoading, authUid, user?.uid, companyId]);
 
   useEffect(() => {
     if (!user || !todayRoute || todayRoute.status !== 'in-progress') return;
@@ -269,9 +269,11 @@ export default function WorkerDashboard() {
         const { latitude, longitude } = position.coords;
         try {
           if (!authUid) return;
-          await updateDoc(doc(db, 'users', authUid), {
+          if (!companyId) return;
+          await updateDoc(doc(db, 'companies', companyId, 'members', authUid), {
             lastLocation: { lat: latitude, lng: longitude },
-            lastActive: serverTimestamp()
+            lastActive: serverTimestamp(),
+            updatedAt: new Date().toISOString(),
           });
         } catch (error) {
           console.error('Error updating location:', error);
@@ -288,7 +290,7 @@ export default function WorkerDashboard() {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [authUid, user, todayRoute?.status]);
+  }, [authUid, user, todayRoute?.status, companyId]);
 
   useEffect(() => {
     if (!todayRoute) return;
@@ -333,7 +335,8 @@ export default function WorkerDashboard() {
       };
       delete (newRouteInstance as any).id; // Remove template ID
 
-      await addDoc(collection(db, 'routes'), newRouteInstance);
+      if (!companyId) return;
+      await addDoc(collection(db, 'companies', companyId, 'routes'), newRouteInstance);
       toast.success(t('worker.toastRouteAssigned'));
     } catch (e) {
       toast.error(t('worker.toastRouteAssignError'));
@@ -358,10 +361,12 @@ export default function WorkerDashboard() {
         delete (newInstance as any).id;
         delete (newInstance as any).isVirtual;
 
-        await addDoc(collection(db, 'routes'), newInstance);
+        if (!companyId) return;
+        await addDoc(collection(db, 'companies', companyId, 'routes'), newInstance);
         toast.success(t('worker.toastDayStartedNew'));
       } else {
-        await updateDoc(doc(db, 'routes', todayRoute.id), { 
+        if (!companyId) return;
+        await updateDoc(doc(db, 'companies', companyId, 'routes', todayRoute.id), { 
           status: 'in-progress',
           startTime: todayRoute.startTime || new Date().toISOString(),
           workerId: authUid
@@ -376,7 +381,8 @@ export default function WorkerDashboard() {
 
   const handleEndDay = async () => {
     if (!todayRoute || !authUid) return;
-    await updateDoc(doc(db, 'routes', todayRoute.id), { 
+    if (!companyId) return;
+    await updateDoc(doc(db, 'companies', companyId, 'routes', todayRoute.id), { 
       status: 'completed',
       endTime: new Date().toISOString(),
       workerId: authUid
@@ -406,7 +412,8 @@ export default function WorkerDashboard() {
         notifyClient: status === 'issue' ? notifyClient : true,
         date: todayRoute.date
       });
-      await addDoc(collection(db, 'logs'), logPayload);
+      if (!companyId) return;
+      await addDoc(collection(db, 'companies', companyId, 'logs'), logPayload);
 
       // Update route progress
       const currentCompleted = todayRoute.completedPools || [];
@@ -414,7 +421,7 @@ export default function WorkerDashboard() {
         const newCompleted = [...currentCompleted, poolId];
         const isAllDone = newCompleted.length === todayRoute.poolIds.length;
         
-        await updateDoc(doc(db, 'routes', todayRoute.id), {
+        await updateDoc(doc(db, 'companies', companyId, 'routes', todayRoute.id), {
           completedPools: newCompleted,
           status: isAllDone ? 'completed' : 'in-progress',
           lastPoolId: poolId,

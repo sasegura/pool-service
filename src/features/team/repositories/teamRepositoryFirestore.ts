@@ -1,34 +1,97 @@
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { TeamRepository } from '../ports';
 import type { TeamUser } from '../types';
 
-export const teamRepositoryFirestore: TeamRepository = {
-  subscribeUsers(onNext, onError) {
-    return onSnapshot(
-      query(collection(db, 'users')),
-      (snap) => {
-        onNext(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TeamUser)));
-      },
-      onError
-    );
-  },
+function mapUiRoleToCompanyRole(role: string): 'admin' | 'supervisor' | 'technician' | 'client' {
+  if (role === 'worker') return 'technician';
+  if (role === 'admin' || role === 'client' || role === 'supervisor') return role;
+  return 'technician';
+}
 
-  async updateUser(id, data) {
-    await updateDoc(doc(db, 'users', id), data);
-  },
+export function createTeamRepositoryFirestore(companyId: string): TeamRepository {
+  return {
+    subscribeUsers(onNext, onError) {
+      return onSnapshot(
+        query(collection(db, 'companies', companyId, 'members'), where('status', '==', 'active')),
+        (snap) => {
+          onNext(
+            snap.docs.map((d) => {
+              const data = d.data();
+              const r = (data.role as string) || 'technician';
+              const legacyRole = r === 'technician' ? 'worker' : r;
+              return {
+                id: d.id,
+                name: (data.name as string) || '',
+                email: (data.email as string) || '',
+                role: legacyRole,
+                membershipRole: r,
+              } as TeamUser;
+            })
+          );
+        },
+        onError
+      );
+    },
 
-  async createPreregisteredUser(data) {
-    const ref = doc(collection(db, 'users'));
-    await setDoc(ref, {
-      ...data,
-      uid: ref.id,
-      createdAt: new Date().toISOString(),
-    });
-    return ref.id;
-  },
+    async updateUser(id, data) {
+      await updateDoc(doc(db, 'companies', companyId, 'members', id), {
+        name: data.name,
+        email: data.email,
+        updatedAt: new Date().toISOString(),
+      });
+    },
 
-  async deleteUser(id) {
-    await deleteDoc(doc(db, 'users', id));
-  },
-};
+    async createPreregisteredUser(data) {
+      const role = mapUiRoleToCompanyRole(data.role);
+      if (role === 'admin') {
+        throw new Error('Cannot invite admin role');
+      }
+      const ref = await addDoc(collection(db, 'companies', companyId, 'members'), {
+        name: data.name.trim().slice(0, 120),
+        email: data.email.trim().toLowerCase().slice(0, 200),
+        role,
+        status: 'invited',
+        updatedAt: new Date().toISOString(),
+      });
+      return ref.id;
+    },
+
+    async deleteUser(id) {
+      const memberRef = doc(db, 'companies', companyId, 'members', id);
+      const snap = await getDoc(memberRef);
+      const uid = typeof snap.data()?.uid === 'string' ? snap.data()?.uid : '';
+      await deleteDoc(memberRef);
+      if (uid) {
+        await deleteDoc(doc(db, 'users', uid, 'memberships', companyId));
+      }
+    },
+
+    async setUserRole(memberDocId, role) {
+      const companyRole = mapUiRoleToCompanyRole(role);
+      const memberRef = doc(db, 'companies', companyId, 'members', memberDocId);
+      const snap = await getDoc(memberRef);
+      const uid = typeof snap.data()?.uid === 'string' ? snap.data()?.uid : '';
+      await updateDoc(memberRef, {
+        role: companyRole,
+        updatedAt: new Date().toISOString(),
+      });
+      if (uid) {
+        await updateDoc(doc(db, 'users', uid, 'memberships', companyId), {
+          role: companyRole,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    },
+  };
+}

@@ -10,9 +10,13 @@ import { useIncidentsPageData } from '../features/incidents/hooks/useIncidentsPa
 export default function IncidentsPage() {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, companyId } = useAuth();
   const [filterDate, setFilterDate] = useState<string>('');
-  const { incidents, pools, workers, loading } = useIncidentsPageData(!authLoading && !!user, filterDate);
+  const { incidents, pools, workers, loading } = useIncidentsPageData(
+    !authLoading && !!user,
+    filterDate,
+    companyId ?? undefined
+  );
 
   return (
     <div className="space-y-6">

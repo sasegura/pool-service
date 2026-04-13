@@ -6,21 +6,22 @@ import {
 } from '../repositories/incidentsRepositoryFirestore';
 import type { ServiceIncidentLog } from '../types';
 
-export function useIncidentsPageData(enabled: boolean, filterDate: string) {
+export function useIncidentsPageData(enabled: boolean, filterDate: string, companyId: string | undefined) {
   const [incidents, setIncidents] = useState<ServiceIncidentLog[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
   const [workers, setWorkers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !companyId) {
       setLoading(false);
       return;
     }
 
-    const unsubPools = subscribePoolNames(setPools);
-    const unsubWorkers = subscribeWorkerNames(setWorkers);
+    const unsubPools = subscribePoolNames(companyId, setPools);
+    const unsubWorkers = subscribeWorkerNames(companyId, setWorkers);
     const unsubLogs = subscribeIssueIncidents(
+      companyId,
       filterDate,
       (rows) => {
         setIncidents(rows);
@@ -37,7 +38,7 @@ export function useIncidentsPageData(enabled: boolean, filterDate: string) {
       unsubWorkers();
       unsubLogs();
     };
-  }, [enabled, filterDate]);
+  }, [enabled, filterDate, companyId]);
 
   return { incidents, pools, workers, loading };
 }

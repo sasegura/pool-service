@@ -25,8 +25,8 @@ const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 export default function PoolsPage() {
   const { t } = useTranslation();
-  const { user, loading: authLoading } = useAuth();
-  const { pools, clients, repository } = usePoolsDirectory(!authLoading && !!user);
+  const { user, loading: authLoading, companyId } = useAuth();
+  const { pools, clients, repository } = usePoolsDirectory(!authLoading && !!user, companyId ?? undefined);
   const [showPoolForm, setShowPoolForm] = useState(false);
   const [editingPoolId, setEditingPoolId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PoolDraft>(() => initialPoolDraft());
@@ -65,6 +65,7 @@ export default function PoolsPage() {
   }, [computedPreview.est, draft.volumeManualOverride]);
 
   const handleQuickOwnerChange = async (poolId: string, nextClientId: string) => {
+    if (!repository) return;
     try {
       await repository.updatePoolOwner(poolId, nextClientId || undefined);
       toast.success(t('pools.toastUpdated'));
@@ -79,6 +80,7 @@ export default function PoolsPage() {
 
   const handleAddPool = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!repository) return;
     if (!isAddressValidated && !editingPoolId) {
       if (!confirm(t('pools.confirmSaveWithoutValidation'))) {
         return;
@@ -116,6 +118,7 @@ export default function PoolsPage() {
   };
 
   const deletePool = async (id: string) => {
+    if (!repository) return;
     if (confirm(t('pools.confirmDelete'))) {
       await repository.deletePool(id);
       toast.info(t('pools.toastDeleted'));
@@ -123,6 +126,10 @@ export default function PoolsPage() {
   };
 
   const isInvalidKey = !GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'MY_GOOGLE_MAPS_API_KEY';
+
+  if (!repository) {
+    return <div className="p-8 text-center text-slate-600">{t('common.loadingGeneric')}</div>;
+  }
 
   if (isInvalidKey) {
     return (

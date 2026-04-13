@@ -5,67 +5,70 @@ import {
   deleteField,
   doc,
   onSnapshot,
+  query,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { PoolRecord } from '../../../types/pool';
 import type { ClientDirectoryEntry, PoolsDirectoryRepository } from '../ports';
 
-export const poolsDirectoryRepositoryFirestore: PoolsDirectoryRepository = {
-  subscribePools(onNext, onError) {
-    return onSnapshot(
-      collection(db, 'pools'),
-      (snap) => {
-        onNext(
-          snap.docs.map(
-            (d) =>
-              ({
-                ...(d.data() as Omit<PoolRecord, 'id'>),
-                id: d.id,
-              }) as PoolRecord
-          )
-        );
-      },
-      onError
-    );
-  },
-
-  subscribeClientUsers(onNext, onError) {
-    return onSnapshot(
-      collection(db, 'users'),
-      (snap) => {
-        onNext(
-          snap.docs
-            .map(
+export function createPoolsDirectoryRepositoryFirestore(companyId: string): PoolsDirectoryRepository {
+  return {
+    subscribePools(onNext, onError) {
+      return onSnapshot(
+        collection(db, 'companies', companyId, 'pools'),
+        (snap) => {
+          onNext(
+            snap.docs.map(
               (d) =>
                 ({
-                  ...(d.data() as Omit<ClientDirectoryEntry, 'id'>),
+                  ...(d.data() as Omit<PoolRecord, 'id'>),
                   id: d.id,
+                }) as PoolRecord
+            )
+          );
+        },
+        onError
+      );
+    },
+
+    subscribeClientUsers(onNext, onError) {
+      return onSnapshot(
+        query(collection(db, 'companies', companyId, 'members'), where('role', '==', 'client')),
+        (snap) => {
+          onNext(
+            snap.docs.map(
+              (d) =>
+                ({
+                  id: d.id,
+                  name: (d.data().name as string) || '',
+                  role: 'client',
                 }) as ClientDirectoryEntry
             )
-            .filter((c) => c.role === 'client')
-        );
-      },
-      onError
-    );
-  },
+          );
+        },
+        onError
+      );
+    },
 
-  async createPool(data) {
-    const ref = await addDoc(collection(db, 'pools'), data);
-    return ref.id;
-  },
+    async createPool(data) {
+      const ref = await addDoc(collection(db, 'companies', companyId, 'pools'), data);
+      return ref.id;
+    },
 
-  async updatePool(id, data) {
-    await updateDoc(doc(db, 'pools', id), data);
-  },
+    async updatePool(id, data) {
+      await updateDoc(doc(db, 'companies', companyId, 'pools', id), data);
+    },
 
-  async deletePool(id) {
-    await deleteDoc(doc(db, 'pools', id));
-  },
+    async deletePool(id) {
+      await deleteDoc(doc(db, 'companies', companyId, 'pools', id));
+    },
 
-  async updatePoolOwner(poolId, clientId) {
-    await updateDoc(doc(db, 'pools', poolId), {
-      clientId: clientId ? clientId : deleteField(),
-    });
-  },
-};
+    async updatePoolOwner(poolId, clientId) {
+      await updateDoc(doc(db, 'companies', companyId, 'pools', poolId), {
+        clientId: clientId ? clientId : deleteField(),
+      });
+    },
+  };
+}

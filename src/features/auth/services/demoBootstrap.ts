@@ -1,42 +1,31 @@
 import type { User } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
-import { doc, getDoc, setDoc, collection, getDocs, addDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, addDoc } from 'firebase/firestore';
 import type { TFunction } from 'i18next';
 import type { AppUser } from '../types';
+import type { CompanyMembershipRole } from '../../tenant/types';
 import { FirestoreOperationType, handleFirestoreError } from '../../../shared/lib/firestoreErrors';
 
-type DemoRole = 'admin' | 'worker' | 'client';
-
 /**
- * Persists the current user profile and seeds demo pools/routes/users when collections are empty.
- * Invoked after auth is ready; errors are logged and do not throw (same behavior as before extraction).
+ * Persists the current user profile and seeds demo pools/routes when tenant collections are empty.
  */
 export async function runDemoBootstrap(params: {
   db: Firestore;
+  companyId: string;
   authUser: User;
-  role: DemoRole;
+  membershipRole: CompanyMembershipRole | null;
   user: AppUser;
   t: TFunction;
 }): Promise<void> {
-  const { db, authUser, role, user, t } = params;
+  const { db, companyId, authUser, membershipRole, user, t } = params;
 
   try {
-    const userDoc = await getDoc(doc(db, 'users', authUser.uid));
-    const userData = userDoc.data();
-
     try {
-      const isWorkerFlag = role === 'worker' || userData?.isWorker || role === 'admin';
-      const isClientFlag = role === 'client' || userData?.isClient || role === 'admin';
-
       await setDoc(
         doc(db, 'users', authUser.uid),
         {
-          name: user.displayName,
-          email: user.email,
-          role: role,
-          isWorker: isWorkerFlag,
-          isClient: isClientFlag,
-          uid: authUser.uid,
+          displayName: user.displayName,
+          email: user.email || null,
           updatedAt: new Date().toISOString(),
         },
         { merge: true }
@@ -46,7 +35,8 @@ export async function runDemoBootstrap(params: {
     }
 
     try {
-      const poolsSnap = await getDocs(collection(db, 'pools'));
+      const poolsRef = collection(db, 'companies', companyId, 'pools');
+      const poolsSnap = await getDocs(poolsRef);
       if (poolsSnap.empty) {
         const demoPools = [
           {
@@ -59,7 +49,7 @@ export async function runDemoBootstrap(params: {
             name: 'Villa Coral Gables',
             address: '456 Miracle Mile, Coral Gables, FL',
             coordinates: { lat: 25.7492, lng: -80.2533 },
-            clientId: 'demo-client-id',
+            clientId: authUser.uid,
           },
           {
             name: 'Apartamentos Brickell',
@@ -69,26 +59,24 @@ export async function runDemoBootstrap(params: {
           },
         ];
         for (const pool of demoPools) {
-          await addDoc(collection(db, 'pools'), pool);
+          await addDoc(poolsRef, pool);
         }
       }
-      // Intentionally do NOT reassign pool.clientId on load: that used to set the first pool's
-      // owner to authUser.uid whenever the user had no pools tagged with their uid, which
-      // overwrote legitimate owner changes after every refresh.
     } catch (e) {
       handleFirestoreError(e, FirestoreOperationType.LIST, 'pools', 'logOnly');
     }
 
     try {
-      const routesSnap = await getDocs(collection(db, 'routes'));
+      const routesRef = collection(db, 'companies', companyId, 'routes');
+      const routesSnap = await getDocs(routesRef);
       if (routesSnap.empty) {
-        const poolsForRoute = await getDocs(collection(db, 'pools'));
+        const poolsForRoute = await getDocs(collection(db, 'companies', companyId, 'pools'));
         const poolIds = poolsForRoute.docs.map((d) => d.id);
         if (poolIds.length > 0) {
           const tomorrow = new Date();
           tomorrow.setDate(tomorrow.getDate() + 1);
           const dateStr = tomorrow.toISOString().slice(0, 10);
-          await addDoc(collection(db, 'routes'), {
+          await addDoc(routesRef, {
             routeName: t('demo.seedRouteName'),
             poolIds: poolIds,
             date: dateStr,
@@ -103,31 +91,6 @@ export async function runDemoBootstrap(params: {
       handleFirestoreError(e, FirestoreOperationType.LIST, 'routes', 'logOnly');
     }
 
-    try {
-      const seedDemoUser = async (demoUid: string, payload: Record<string, unknown>) => {
-        const ref = doc(db, 'users', demoUid);
-        const snap = await getDoc(ref);
-        if (!snap.exists) {
-          await setDoc(ref, payload);
-        }
-      };
-      await seedDemoUser('demo-worker-id', {
-        name: t('demo.seedWorkerName'),
-        email: 'worker@demo.com',
-        role: 'worker',
-        uid: 'demo-worker-id',
-        createdAt: new Date().toISOString(),
-      });
-      await seedDemoUser('demo-client-id', {
-        name: t('demo.seedClientName'),
-        email: 'client@demo.com',
-        role: 'client',
-        uid: 'demo-client-id',
-        createdAt: new Date().toISOString(),
-      });
-    } catch (e) {
-      handleFirestoreError(e, FirestoreOperationType.WRITE, 'users/demo-worker-id', 'logOnly');
-    }
   } catch (err) {
     console.error('Error seeding demo data:', err);
   }

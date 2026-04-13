@@ -1,19 +1,14 @@
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-} from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { ServiceIncidentLog } from '../types';
 
 export function subscribePoolNames(
+  companyId: string,
   onNext: (map: Record<string, string>) => void,
   onError?: (e: unknown) => void
 ) {
   return onSnapshot(
-    collection(db, 'pools'),
+    collection(db, 'companies', companyId, 'pools'),
     (snap) => {
       const pMap: Record<string, string> = {};
       snap.docs.forEach((d) => {
@@ -26,11 +21,12 @@ export function subscribePoolNames(
 }
 
 export function subscribeWorkerNames(
+  companyId: string,
   onNext: (map: Record<string, string>) => void,
   onError?: (e: unknown) => void
 ) {
   return onSnapshot(
-    collection(db, 'users'),
+    collection(db, 'companies', companyId, 'members'),
     (snap) => {
       const wMap: Record<string, string> = {};
       snap.docs.forEach((d) => {
@@ -43,13 +39,18 @@ export function subscribeWorkerNames(
 }
 
 export function subscribeIssueIncidents(
+  companyId: string,
   filterDate: string,
   onNext: (incidents: ServiceIncidentLog[]) => void,
   onError?: (e: unknown) => void
 ) {
-  let q = query(collection(db, 'logs'), orderBy('date', 'desc'));
+  let q = query(collection(db, 'companies', companyId, 'logs'), orderBy('date', 'desc'));
   if (filterDate) {
-    q = query(collection(db, 'logs'), where('date', '==', filterDate), orderBy('date', 'desc'));
+    q = query(
+      collection(db, 'companies', companyId, 'logs'),
+      where('date', '==', filterDate),
+      orderBy('date', 'desc')
+    );
   }
   return onSnapshot(
     q,

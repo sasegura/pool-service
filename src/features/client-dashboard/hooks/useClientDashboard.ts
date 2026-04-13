@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 
@@ -22,37 +22,14 @@ export interface ClientDashboardLog {
   notifyClient?: boolean;
 }
 
-export function useClientDashboard(userUid: string | undefined, userEmail: string | undefined) {
+export function useClientDashboard(userUid: string | undefined, companyId: string | undefined) {
   const [pools, setPools] = useState<ClientDashboardPool[]>([]);
   const [logs, setLogs] = useState<ClientDashboardLog[]>([]);
   const [workers, setWorkers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [poolOwnerDocIds, setPoolOwnerDocIds] = useState<string[]>([]);
-
-  const poolOwnerKey = useMemo(() => poolOwnerDocIds.slice().sort().join(','), [poolOwnerDocIds]);
 
   useEffect(() => {
-    if (!userUid) {
-      setPoolOwnerDocIds([]);
-      return;
-    }
-    const email = (userEmail || '').trim().toLowerCase();
-    setPoolOwnerDocIds([userUid]);
-    const unsub = onSnapshot(collection(db, 'users'), (snap) => {
-      const ids = new Set<string>([userUid]);
-      if (email) {
-        snap.docs.forEach((d) => {
-          const em = (d.data().email as string | undefined)?.trim().toLowerCase();
-          if (em && em === email) ids.add(d.id);
-        });
-      }
-      setPoolOwnerDocIds(Array.from(ids));
-    });
-    return () => unsub();
-  }, [userUid, userEmail]);
-
-  useEffect(() => {
-    if (!userUid || poolOwnerDocIds.length === 0) {
+    if (!userUid || !companyId) {
       setPools([]);
       setLogs([]);
       setLoading(false);
@@ -61,19 +38,19 @@ export function useClientDashboard(userUid: string | undefined, userEmail: strin
 
     let unsubLogs: (() => void) | undefined;
 
-    const unsubWorkers = onSnapshot(collection(db, 'users'), (snap) => {
+    const unsubWorkers = onSnapshot(collection(db, 'companies', companyId, 'members'), (snap) => {
       const wMap: Record<string, string> = {};
       snap.docs.forEach((d) => {
-        wMap[d.id] = d.data().name as string;
+        const data = d.data();
+        wMap[d.id] = (data.name as string) || (data.email as string) || '';
       });
       setWorkers(wMap);
     });
 
-    const inIds = poolOwnerDocIds.slice(0, FIRESTORE_IN_MAX);
-    const qPools =
-      inIds.length === 1
-        ? query(collection(db, 'pools'), where('clientId', '==', inIds[0]))
-        : query(collection(db, 'pools'), where('clientId', 'in', inIds));
+    const qPools = query(
+      collection(db, 'companies', companyId, 'pools'),
+      where('clientId', '==', userUid)
+    );
 
     const unsubPools = onSnapshot(
       qPools,
@@ -87,9 +64,9 @@ export function useClientDashboard(userUid: string | undefined, userEmail: strin
         setPools(poolsData);
 
         if (poolsData.length > 0) {
-          const poolIds = poolsData.map((p) => p.id);
+          const poolIds = poolsData.map((p) => p.id).slice(0, FIRESTORE_IN_MAX);
           const qLogs = query(
-            collection(db, 'logs'),
+            collection(db, 'companies', companyId, 'logs'),
             where('poolId', 'in', poolIds),
             orderBy('date', 'desc')
           );
@@ -125,7 +102,7 @@ export function useClientDashboard(userUid: string | undefined, userEmail: strin
       unsubPools();
       unsubLogs?.();
     };
-  }, [userUid, poolOwnerKey]);
+  }, [userUid, companyId]);
 
   return { pools, logs, workers, loading };
 }

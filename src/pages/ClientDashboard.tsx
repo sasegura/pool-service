@@ -11,8 +11,8 @@ import { useClientDashboard } from '../features/client-dashboard/hooks/useClient
 export default function ClientDashboard() {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
-  const { user } = useAuth();
-  const { pools, logs, workers, loading } = useClientDashboard(user?.uid, user?.email);
+  const { user, companyId } = useAuth();
+  const { pools, logs, workers, loading } = useClientDashboard(user?.uid, companyId ?? undefined);
 
   if (loading) return <div className="p-8 text-center">{t('client.loadingHistory')}</div>;
 

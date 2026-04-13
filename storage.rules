@@ -1,0 +1,28 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function membership(companyId) {
+      return firestore.get(
+        /databases/ai-studio-4eed925e-a375-4f96-a5c2-f845a152f2af/documents/users/$(request.auth.uid)/memberships/$(companyId)
+      );
+    }
+
+    function hasActiveStaffOrClient(companyId) {
+      return request.auth != null
+        && membership(companyId).data.status == 'active'
+        && membership(companyId).data.role in ['admin', 'supervisor', 'technician', 'client'];
+    }
+
+    function canWriteCompanyMedia(companyId) {
+      return request.auth != null
+        && membership(companyId).data.status == 'active'
+        && membership(companyId).data.role in ['admin', 'supervisor', 'technician'];
+    }
+
+    match /companies/{companyId}/{allPaths=**} {
+      allow read: if hasActiveStaffOrClient(companyId);
+      allow write: if canWriteCompanyMedia(companyId);
+    }
+  }
+}

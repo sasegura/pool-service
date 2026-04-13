@@ -36,7 +36,7 @@ export default function PoolVisitPage() {
   const routeId = searchParams.get('routeId') || undefined;
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, companyId } = useAuth();
 
   const [pool, setPool] = useState<PoolRecord | null>(null);
   const [loadingPool, setLoadingPool] = useState(true);
@@ -51,12 +51,15 @@ export default function PoolVisitPage() {
   const [photoUrlInput, setPhotoUrlInput] = useState('');
 
   useEffect(() => {
-    if (!poolId) return;
+    if (!poolId || !companyId) {
+      setLoadingPool(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoadingPool(true);
       try {
-        const poolData = await fetchPoolById(poolId);
+        const poolData = await fetchPoolById(companyId, poolId);
         if (cancelled) return;
         if (!poolData) {
           setPool(null);
@@ -64,7 +67,7 @@ export default function PoolVisitPage() {
         }
         setPool(poolData);
 
-        const recentVisits = await fetchRecentVisitDocs(poolId, 5);
+        const recentVisits = await fetchRecentVisitDocs(companyId, poolId, 5);
         if (cancelled) return;
         const bestMatch = recentVisits.find((v) => {
           const sameTech = !!user?.uid && v.technicianId === user.uid;
@@ -102,7 +105,7 @@ export default function PoolVisitPage() {
     return () => {
       cancelled = true;
     };
-  }, [poolId, routeId, user?.uid]);
+  }, [poolId, routeId, user?.uid, companyId]);
 
   const effectiveVolume = useMemo(() => {
     if (!pool) return 50;
@@ -152,7 +155,7 @@ export default function PoolVisitPage() {
   };
 
   const handleSave = async () => {
-    if (!poolId || !user || !pool) return;
+    if (!poolId || !user || !pool || !companyId) return;
     setSaving(true);
     try {
       const visitedAt = new Date().toISOString();
@@ -194,7 +197,7 @@ export default function PoolVisitPage() {
       const nextMaint = new Date(visitedAt);
       nextMaint.setDate(nextMaint.getDate() + DEFAULT_MAINTENANCE_INTERVAL_DAYS);
 
-      await savePoolVisitWithPoolUpdate(poolId, visitPayload, (visitDocId) =>
+      await savePoolVisitWithPoolUpdate(companyId, poolId, visitPayload, (visitDocId) =>
         deepRemoveUndefined({
           healthStatus: health,
           lastVisitAt: visitedAt,
@@ -222,7 +225,7 @@ export default function PoolVisitPage() {
     }
   };
 
-  if (authLoading || loadingPool) {
+  if (authLoading || !companyId || loadingPool) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-500">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />

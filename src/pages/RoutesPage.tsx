@@ -54,8 +54,8 @@ export default function RoutesPage() {
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const weekdayInitials = t('routesPage.weekdayInitials', { returnObjects: true }) as string[];
   const calendarWeekdayHeaders = t('routesPage.calendarWeekdays', { returnObjects: true }) as string[];
-  const { user, loading: authLoading } = useAuth();
-  const { pools, workers, routes } = useRoutesDirectory(!authLoading && !!user);
+  const { user, loading: authLoading, companyId } = useAuth();
+  const { pools, workers, routes } = useRoutesDirectory(!authLoading && !!user && !!companyId, companyId ?? undefined);
   const [showRouteForm, setShowRouteForm] = useState(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
@@ -283,12 +283,12 @@ export default function RoutesPage() {
       }
 
       if (editingRouteId) {
-        await updateDoc(doc(db, 'routes', editingRouteId), routeToSave);
+        await updateDoc(doc(db, 'companies', companyId!, 'routes', editingRouteId), routeToSave);
         toast.success(t('routesPage.toastUpdated'));
       } else {
         routeToSave.createdAt = new Date().toISOString();
         routeToSave.order = datedRoutes.length;
-        await addDoc(collection(db, 'routes'), routeToSave);
+        await addDoc(collection(db, 'companies', companyId!, 'routes'), routeToSave);
         toast.success(t('routesPage.toastSaved'));
       }
       setNewRoute(defaultNewRouteForm());
@@ -396,7 +396,7 @@ export default function RoutesPage() {
     const label = (routeName || '').trim() || t('routesPage.deleteFallback');
     const shouldDelete = window.confirm(t('routesPage.deleteConfirm', { label }));
     if (shouldDelete) {
-      await deleteDoc(doc(db, 'routes', id));
+      await deleteDoc(doc(db, 'companies', companyId!, 'routes', id));
       toast.info(t('routesPage.toastDeleted'));
     }
   };
@@ -605,7 +605,7 @@ export default function RoutesPage() {
           const srcWorker = (src.workerId || '').trim();
           const workerId = srcWorker || defaultWorker;
 
-          const ref = doc(collection(db, 'routes'));
+          const ref = doc(collection(db, 'companies', companyId!, 'routes'));
           batch.set(ref, {
             poolIds: [...src.poolIds],
             routeName: src.routeName || '',
@@ -642,7 +642,7 @@ export default function RoutesPage() {
 
   const updatePlannedWorker = async (routeId: string, workerId: string) => {
     try {
-      await updateDoc(doc(db, 'routes', routeId), { workerId });
+      await updateDoc(doc(db, 'companies', companyId!, 'routes', routeId), { workerId });
       toast.success(t('routesPage.toastWorkerUpdated'));
     } catch {
       toast.error(t('routesPage.toastWorkerError'));
@@ -660,8 +660,8 @@ export default function RoutesPage() {
     const pb = b.planningPriority ?? targetIndex;
 
     try {
-      await updateDoc(doc(db, 'routes', a.id), { planningPriority: pb });
-      await updateDoc(doc(db, 'routes', b.id), { planningPriority: pa });
+      await updateDoc(doc(db, 'companies', companyId!, 'routes', a.id), { planningPriority: pb });
+      await updateDoc(doc(db, 'companies', companyId!, 'routes', b.id), { planningPriority: pa });
     } catch {
       toast.error(t('routesPage.toastReorderError'));
     }
@@ -674,6 +674,10 @@ export default function RoutesPage() {
         <h2 className="text-xl font-bold text-amber-900 mb-2">{t('routesPage.missingMapsKey')}</h2>
       </div>
     );
+  }
+
+  if (!companyId) {
+    return <div className="p-8 text-center text-slate-600">{t('common.loadingGeneric')}</div>;
   }
 
   return (

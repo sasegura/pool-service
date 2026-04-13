@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
+
 export interface AdminOverviewRoute {
   id: string;
   workerId: string;
@@ -26,7 +27,7 @@ export interface AdminOverviewWorkerUser {
   lastActive?: { toDate?: () => Date };
 }
 
-export function useAdminOverviewData(selectedDate: string, enabled: boolean) {
+export function useAdminOverviewData(selectedDate: string, enabled: boolean, companyId: string | undefined) {
   const [poolsCount, setPoolsCount] = useState(0);
   const [workersCount, setWorkersCount] = useState(0);
   const [completedCount, setCompletedCount] = useState(0);
@@ -38,9 +39,9 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean) {
   const [liveWorkers, setLiveWorkers] = useState<AdminOverviewWorkerUser[]>([]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !companyId) return;
 
-    const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
+    const unsubPools = onSnapshot(collection(db, 'companies', companyId, 'pools'), (snap) => {
       setPoolsCount(snap.size);
       const pMap: Record<string, string> = {};
       snap.docs.forEach((d) => {
@@ -50,41 +51,58 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean) {
       setPools(pMap);
     });
 
-    const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
+    const unsubMembers = onSnapshot(collection(db, 'companies', companyId, 'members'), (snap) => {
+      const uMap: Record<string, string> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        uMap[d.id] = (data.name as string) || (data.email as string) || '';
+      });
+      setUsers(uMap);
+
       const workerDocs = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as AdminOverviewWorkerUser))
-        .filter((u) => u.role === 'worker' || (u as { isWorker?: boolean }).isWorker);
+        .map((d) => {
+          const data = d.data();
+          const r = (data.role as string) || '';
+          return {
+            id: d.id,
+            name: (data.name as string) || '',
+            role: r,
+            lastLocation: data.lastLocation as AdminOverviewWorkerUser['lastLocation'],
+            lastActive: data.lastActive as AdminOverviewWorkerUser['lastActive'],
+          } as AdminOverviewWorkerUser;
+        })
+        .filter((u) => u.role === 'technician' || u.role === 'supervisor');
 
       setAllWorkers(workerDocs);
       setWorkersCount(workerDocs.length);
       setLiveWorkers(workerDocs.filter((w) => w.lastLocation));
-
-      const uMap: Record<string, string> = {};
-      snap.docs.forEach((d) => {
-        uMap[d.id] = d.data().name as string;
-      });
-      setUsers(uMap);
     });
 
-    const routesQ = query(collection(db, 'routes'), where('date', '==', selectedDate));
+    const routesQ = query(
+      collection(db, 'companies', companyId, 'routes'),
+      where('date', '==', selectedDate)
+    );
     const unsubRoutes = onSnapshot(routesQ, (snap) => {
       const routeDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AdminOverviewRoute));
       setRoutes(routeDocs);
       setCompletedCount(routeDocs.filter((d) => d.status === 'completed').length);
     });
 
-    const logsQ = query(collection(db, 'logs'), where('date', '==', selectedDate));
+    const logsQ = query(
+      collection(db, 'companies', companyId, 'logs'),
+      where('date', '==', selectedDate)
+    );
     const unsubLogs = onSnapshot(logsQ, (snap) => {
       setIncidentsCount(snap.docs.filter((d) => d.data().status === 'issue').length);
     });
 
     return () => {
       unsubPools();
-      unsubUsers();
+      unsubMembers();
       unsubRoutes();
       unsubLogs();
     };
-  }, [selectedDate, enabled]);
+  }, [selectedDate, enabled, companyId]);
 
   return {
     poolsCount,

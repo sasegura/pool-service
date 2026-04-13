@@ -1,148 +1,230 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    // Collection: users
-    // Fields: name (string), email (string), role (string: admin|worker)
-    //
-    // Collection: pools
-    // Fields: name (string), address (string), coordinates (map), clientId (string)
-    //
-    // Collection: routes
-    // Fields: workerId (string), date (string), poolIds (list), status (string)
-    //
-    // Collection: logs
-    // Fields: workerId (string), poolId (string), arrivalTime (timestamp), departureTime (timestamp), status (string), notes (string), photos (list)
-    // ===============================================================
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+
+    function membershipDoc(companyId) {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(companyId));
     }
 
-    function getUserData(userId) {
-      return get(/databases/$(database)/documents/users/$(userId)).data;
+    function hasActiveMembership(companyId) {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(companyId))
+        && membershipDoc(companyId).data.status == 'active';
     }
 
-    function hasRole(role) {
-      return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-             getUserData(request.auth.uid).role == role;
+    function memberRole(companyId) {
+      return membershipDoc(companyId).data.role;
     }
 
-    function isAdmin() {
-      return isAuthenticated() && 
-        (request.auth.token.email == "sasegura.fernandez87@gmail.com" || 
-         hasRole('admin'));
-    }
-    
-    function isWorker() {
-      return hasRole('worker');
-    }
-    
-    function isClient() {
-      return hasRole('client');
+    function isStaff(companyId) {
+      return hasActiveMembership(companyId)
+        && memberRole(companyId) in ['admin', 'supervisor', 'technician'];
     }
 
-    // Validation Helpers
-    function isValidUser(data) {
-      return data is map &&
-             data.keys().hasAll(['name', 'role', 'uid']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.role in ['admin', 'worker', 'client'] &&
-             data.uid is string;
+    function isAdminOrSupervisor(companyId) {
+      return hasActiveMembership(companyId)
+        && memberRole(companyId) in ['admin', 'supervisor'];
     }
 
-    function isValidPool(data) {
-      return data is map &&
-             data.keys().hasAll(['name', 'address']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.address is string && data.address.size() > 0 && data.address.size() < 200;
+    function isCompanyAdmin(companyId) {
+      return hasActiveMembership(companyId) && memberRole(companyId) == 'admin';
     }
 
-    function isValidRoute(data) {
-      return data is map &&
-             data.keys().hasAll(['poolIds', 'status']) &&
-             data.poolIds is list && data.poolIds.size() > 0 &&
-             data.status in ['pending', 'in-progress', 'completed'];
+    function isPortalClient(companyId) {
+      return hasActiveMembership(companyId) && memberRole(companyId) == 'client';
     }
 
-    // ===============================================================
-    // Rules
-    // ===============================================================
+    function isTechnician(companyId) {
+      return hasActiveMembership(companyId) && memberRole(companyId) == 'technician';
+    }
 
-    // Users collection
+    function poolDoc(companyId, poolId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/pools/$(poolId));
+    }
+
+    function poolOwnedByClient(companyId, poolId) {
+      return exists(/databases/$(database)/documents/companies/$(companyId)/pools/$(poolId))
+        && poolDoc(companyId, poolId).data.clientId == request.auth.uid;
+    }
+
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      // Allow users to create their own profile, or admins to create any
-      // Also allow seeding the specific demo IDs for the demo environment
-      allow create: if isAuthenticated() && (
-        isOwner(userId) || 
-        isAdmin() || 
-        userId in ['demo-worker-id', 'demo-client-id']
-      );
-      // Demo profile docs use fixed IDs; merge:true becomes an update after the first seed.
-      // Allow the same callers as create so anonymous demo sessions do not fail on reload.
-      allow update: if isAuthenticated() && (
-        isAdmin() ||
-        isOwner(userId) ||
-        userId in ['demo-worker-id', 'demo-client-id']
-      );
-      allow delete: if isAdmin();
-    }
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create, update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if false;
 
-    // Pools collection
-    match /pools/{poolId} {
-      allow read: if isAuthenticated();
-      // Allow admins to write, or any authenticated user to seed if the collection is empty
-      // (Simplified for demo: allow any authenticated user to create pools for now)
-      allow write: if isAuthenticated() && (isAdmin() || !exists(/databases/$(database)/documents/pools/seed-marker));
+      match /memberships/{companyId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
 
-      match /visits/{visitId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && (isAdmin() || isWorker());
-        allow update, delete: if isAdmin();
+        allow create: if isAuthenticated()
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasAll(['companyId', 'role', 'status'])
+          && request.resource.data.companyId == companyId
+          && request.resource.data.role == 'admin'
+          && request.resource.data.status == 'active'
+          && existsAfter(/databases/$(database)/documents/companies/$(companyId))
+          && getAfter(/databases/$(database)/documents/companies/$(companyId)).data.createdByUid == request.auth.uid
+          && !exists(/databases/$(database)/documents/users/$(userId)/memberships/$(companyId));
+
+        allow create: if isAuthenticated()
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasAll(['companyId', 'role', 'status', 'fromInvitedMemberId'])
+          && request.resource.data.companyId == companyId
+          && request.resource.data.status == 'active'
+          && request.auth.token.email != null
+          && exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.resource.data.fromInvitedMemberId))
+          && get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.resource.data.fromInvitedMemberId)).data.status == 'invited'
+          && get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.resource.data.fromInvitedMemberId)).data.email == request.auth.token.email
+          && request.resource.data.role == get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.resource.data.fromInvitedMemberId)).data.role
+          && !exists(/databases/$(database)/documents/users/$(userId)/memberships/$(companyId));
+
+        allow update: if isCompanyAdmin(companyId)
+          && request.auth.uid != userId
+          && request.resource.data.companyId == resource.data.companyId
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.role in ['admin', 'supervisor', 'technician', 'client'];
+
+        allow delete: if isCompanyAdmin(companyId) && request.auth.uid != userId;
       }
     }
 
-    // Routes collection
-    match /routes/{routeId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && (isAdmin() || !exists(/databases/$(database)/documents/routes/seed-marker));
-      allow update: if isAuthenticated() && (
-        isAdmin() || 
-        request.resource.data.workerId == request.auth.uid
-      );
-      allow delete: if isAdmin();
+    match /companies/{companyId} {
+      allow read: if hasActiveMembership(companyId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.keys().hasAll(['name', 'status', 'createdByUid'])
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.status == 'active';
+
+      allow update: if isAdminOrSupervisor(companyId);
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow get: if hasActiveMembership(companyId)
+          || (
+            isAuthenticated()
+            && resource.data.status == 'invited'
+            && request.auth.token.email != null
+            && resource.data.email == request.auth.token.email
+          );
+
+        allow list: if hasActiveMembership(companyId);
+
+        allow create: if isAuthenticated()
+          && request.auth.uid == memberId
+          && existsAfter(/databases/$(database)/documents/companies/$(companyId))
+          && getAfter(/databases/$(database)/documents/companies/$(companyId)).data.createdByUid == request.auth.uid
+          && request.resource.data.uid == memberId
+          && request.resource.data.role == 'admin'
+          && request.resource.data.status == 'active';
+
+        allow create: if isAdminOrSupervisor(companyId)
+          && request.resource.data.keys().hasAll(['name', 'email', 'role', 'status'])
+          && request.resource.data.name is string
+          && request.resource.data.email is string
+          && request.resource.data.role in ['admin', 'supervisor', 'technician', 'client']
+          && request.resource.data.status in ['active', 'invited'];
+
+        allow update: if (hasActiveMembership(companyId) && request.auth.uid == memberId
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.email == resource.data.email
+            && request.resource.data.name == resource.data.name)
+          || (
+            hasActiveMembership(companyId)
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.status == resource.data.status
+          )
+          || (isAdminOrSupervisor(companyId)
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.status == resource.data.status)
+          || (
+            resource.data.status == 'invited'
+            && request.resource.data.status == 'active'
+            && request.resource.data.uid == request.auth.uid
+            && request.auth.token.email != null
+            && resource.data.email == request.auth.token.email
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.name == resource.data.name
+            && request.resource.data.email == resource.data.email
+          );
+
+        allow delete: if isAdminOrSupervisor(companyId);
+      }
+
+      match /invites/{inviteId} {
+        allow read, write: if false;
+      }
+
+      match /clients/{clientId} {
+        allow read: if isStaff(companyId);
+        allow create, update, delete: if isAdminOrSupervisor(companyId);
+      }
+
+      match /pools/{poolId} {
+        allow read: if isStaff(companyId)
+          || (isPortalClient(companyId) && resource.data.clientId == request.auth.uid);
+        allow create: if isAdminOrSupervisor(companyId)
+          && request.resource.data.keys().hasAll(['name', 'address'])
+          && request.resource.data.name is string
+          && request.resource.data.address is string;
+        allow update: if isStaff(companyId);
+        allow delete: if isAdminOrSupervisor(companyId);
+
+        match /visits/{visitId} {
+          allow read: if isStaff(companyId)
+            || (isPortalClient(companyId) && poolOwnedByClient(companyId, poolId));
+          allow create: if isStaff(companyId);
+          allow update, delete: if isAdminOrSupervisor(companyId);
+        }
+      }
+
+      match /routes/{routeId} {
+        allow read: if isStaff(companyId);
+        allow create: if isStaff(companyId);
+        allow update: if isAdminOrSupervisor(companyId)
+          || (isTechnician(companyId)
+            && (resource.data.workerId == request.auth.uid
+              || resource.data.workerId == ''
+              || resource.data.workerId == null));
+        allow delete: if isAdminOrSupervisor(companyId);
+      }
+
+      match /logs/{logId} {
+        allow read: if isAdminOrSupervisor(companyId)
+          || (isTechnician(companyId) && resource.data.workerId == request.auth.uid)
+          || (isPortalClient(companyId)
+            && poolOwnedByClient(companyId, resource.data.poolId)
+            && (resource.data.status == 'ok' || resource.data.get('notifyClient', true) == true));
+        allow create: if isStaff(companyId);
+        allow update: if isAdminOrSupervisor(companyId);
+        allow delete: if isAdminOrSupervisor(companyId);
+      }
     }
 
-    // Logs collection
+    match /pools/{poolId} {
+      allow read, write: if false;
+      match /visits/{visitId} {
+        allow read, write: if false;
+      }
+    }
+    match /routes/{routeId} {
+      allow read, write: if false;
+    }
     match /logs/{logId} {
-      allow read: if isAuthenticated() && (
-        isAdmin() || 
-        isWorker() || 
-        resource.data.workerId == request.auth.uid ||
-        (isClient() && 
-         get(/databases/$(database)/documents/pools/$(resource.data.poolId)).data.clientId == request.auth.uid &&
-         (resource.data.status == 'ok' || resource.data.get('notifyClient', true) == true))
-      );
-      allow create: if isAuthenticated() && (
-        isAdmin() ||
-        isWorker() ||
-        request.resource.data.workerId == request.auth.uid
-      );
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow read, write: if false;
+    }
+
+    match /test/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
     }
   }
 }

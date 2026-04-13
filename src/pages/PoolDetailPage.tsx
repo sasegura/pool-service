@@ -11,6 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import { db } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
 import { Button, Card } from '../components/ui/Common';
 import { PoolStatusBadge } from '../components/PoolStatusBadge';
 import { estimateVolumeM3, computeAvgDepthM } from '../lib/poolVolume';
@@ -21,6 +22,7 @@ import type { PoolRecord, PoolVisitRecord } from '../types/pool';
 export default function PoolDetailPage() {
   const { poolId } = useParams<{ poolId: string }>();
   const navigate = useNavigate();
+  const { companyId } = useAuth();
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
 
@@ -29,8 +31,8 @@ export default function PoolDetailPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!poolId) return;
-    const unsubPool = onSnapshot(doc(db, 'pools', poolId), (snap) => {
+    if (!poolId || !companyId) return;
+    const unsubPool = onSnapshot(doc(db, 'companies', companyId, 'pools', poolId), (snap) => {
       if (!snap.exists()) {
         setPool(null);
         setLoading(false);
@@ -39,7 +41,11 @@ export default function PoolDetailPage() {
       setPool({ ...(snap.data() as Omit<PoolRecord, 'id'>), id: snap.id } as PoolRecord);
       setLoading(false);
     });
-    const q = query(collection(db, 'pools', poolId, 'visits'), orderBy('visitedAt', 'desc'), limit(24));
+    const q = query(
+      collection(db, 'companies', companyId, 'pools', poolId, 'visits'),
+      orderBy('visitedAt', 'desc'),
+      limit(24)
+    );
     const unsubVisits = onSnapshot(q, (snap) => {
       setVisits(
         snap.docs.map(
@@ -51,7 +57,7 @@ export default function PoolDetailPage() {
       unsubPool();
       unsubVisits();
     };
-  }, [poolId]);
+  }, [poolId, companyId]);
 
   const computedVolume = useMemo(() => {
     if (!pool) return undefined;

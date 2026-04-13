@@ -20,7 +20,7 @@ if (!firebaseConfig.apiKey || firebaseConfig.apiKey === 'undefined') {
   console.error("Firebase API Key is missing. Please check your .env file or Secrets panel.");
 }
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 const databaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId;
 export const db = getFirestore(app, databaseId && databaseId !== 'undefined' ? databaseId : '(default)');

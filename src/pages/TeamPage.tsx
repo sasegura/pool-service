@@ -10,14 +10,15 @@ import type { TeamUser } from '../features/team/types';
 
 export default function TeamPage() {
   const { t } = useTranslation();
-  const { user, loading: authLoading } = useAuth();
-  const { allUsers, repository } = useTeamUsers(!authLoading && !!user);
+  const { user, loading: authLoading, companyId } = useAuth();
+  const { allUsers, repository } = useTeamUsers(!authLoading && !!user, companyId ?? undefined);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [newWorker, setNewWorker] = useState({ name: '', email: '', role: 'worker' });
 
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!repository || !companyId) return;
     try {
       if (editingUserId) {
         const email = newWorker.email.trim().toLowerCase();
@@ -35,12 +36,13 @@ export default function TeamPage() {
           return;
         }
 
-        await repository.createPreregisteredUser({
+        const memberDocId = await repository.createPreregisteredUser({
           name: newWorker.name.trim(),
           email,
           role: newWorker.role,
         });
-        toast.success(t('team.toastPreregistered'));
+        const link = `${window.location.origin}/accept-invite?companyId=${encodeURIComponent(companyId)}&inviteId=${encodeURIComponent(memberDocId)}`;
+        toast.success(t('team.toastPreregistered'), { description: link });
       }
       setNewWorker({ name: '', email: '', role: 'worker' });
       setShowWorkerForm(false);
@@ -57,16 +59,13 @@ export default function TeamPage() {
   };
 
   const toggleRole = async (member: TeamUser) => {
+    if (!repository) return;
     const roles: ('admin' | 'worker' | 'client')[] = ['admin', 'worker', 'client'];
     const currentIndex = roles.indexOf(member.role as 'admin' | 'worker' | 'client');
     const nextRole = roles[(currentIndex + 1) % roles.length];
 
     try {
-      await repository.updateUser(member.id, {
-        name: member.name,
-        email: member.email,
-        role: nextRole,
-      });
+      await repository.setUserRole(member.id, nextRole);
       toast.success(t('team.roleUpdated', { role: t(`common.${nextRole}`) }));
     } catch {
       toast.error(t('team.toastRoleError'));
@@ -74,11 +73,16 @@ export default function TeamPage() {
   };
 
   const deleteUser = async (id: string) => {
+    if (!repository) return;
     if (confirm(t('team.confirmDelete'))) {
       await repository.deleteUser(id);
       toast.info(t('team.toastDeleted'));
     }
   };
+
+  if (!repository) {
+    return <div className="p-8 text-center text-slate-600">{t('common.loadingGeneric')}</div>;
+  }
 
   return (
     <div className="space-y-6">
