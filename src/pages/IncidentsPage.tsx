@@ -4,7 +4,7 @@ import { db } from '../lib/firebase';
 import { Button, Card } from '../components/ui/Common';
 import { AlertCircle, Calendar, MapPin, User, Clock, X } from 'lucide-react';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { es, enUS } from 'date-fns/locale';
 
 interface Incident {
   id: string;
@@ -27,8 +27,11 @@ interface Worker {
 }
 
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 
 export default function IncidentsPage() {
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const { user, loading: authLoading } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
@@ -77,8 +80,8 @@ export default function IncidentsPage() {
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900">Incidencias Reportadas</h2>
-          <p className="text-slate-500 font-medium">Historial de problemas detectados durante los servicios</p>
+          <h2 className="text-2xl font-black text-slate-900">{t('incidents.title')}</h2>
+          <p className="text-slate-500 font-medium">{t('incidents.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative flex items-center">
@@ -93,7 +96,7 @@ export default function IncidentsPage() {
               <button 
                 onClick={() => setFilterDate('')}
                 className="absolute right-3 p-1 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                title="Limpiar filtro"
+                title={t('incidents.clearFilter')}
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -103,14 +106,14 @@ export default function IncidentsPage() {
       </header>
 
       {loading ? (
-        <div className="p-12 text-center text-slate-500">Cargando incidencias...</div>
+        <div className="p-12 text-center text-slate-500">{t('incidents.loading')}</div>
       ) : incidents.length === 0 ? (
         <Card className="p-12 text-center flex flex-col items-center justify-center border-dashed border-2">
           <div className="bg-emerald-50 p-4 rounded-full mb-4">
             <AlertCircle className="w-8 h-8 text-emerald-500" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">No hay incidencias</h3>
-          <p className="text-slate-500">Todo parece estar funcionando correctamente.</p>
+          <h3 className="text-lg font-bold text-slate-900">{t('incidents.noneTitle')}</h3>
+          <p className="text-slate-500">{t('incidents.noneBody')}</p>
         </Card>
       ) : (
         <div className="grid gap-4">
@@ -120,13 +123,13 @@ export default function IncidentsPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase">
-                      Incidencia
+                      {t('incidents.badge')}
                     </span>
                     <span className="text-xs text-slate-400 font-mono">ID: {incident.id.slice(0, 8)}</span>
                   </div>
                   <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                     <MapPin className="w-4 h-4 text-slate-400" />
-                    {pools[incident.poolId] || 'Piscina desconocida'}
+                    {pools[incident.poolId] || t('incidents.unknownPool')}
                   </h3>
                   <p className="text-slate-600 text-sm bg-slate-50 p-3 rounded-lg italic border border-slate-100">
                     "{incident.notes}"
@@ -135,16 +138,16 @@ export default function IncidentsPage() {
                 <div className="flex flex-wrap gap-4 text-xs font-medium text-slate-500 md:text-right md:flex-col md:items-end">
                   <div className="flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" />
-                    {workers[incident.workerId] || 'Técnico desconocido'}
+                    {workers[incident.workerId] || t('incidents.unknownWorker')}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5" />
-                    {format(new Date(incident.date + 'T00:00:00'), 'dd MMM, yyyy', { locale: es })}
+                    {format(new Date(incident.date + 'T00:00:00'), 'dd MMM, yyyy', { locale: dateLocale })}
                   </div>
                   {incident.arrivalTime && (
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5" />
-                      Reportado a las {format(incident.arrivalTime.toDate(), 'HH:mm')}
+                      {t('incidents.reportedAt')} {format(incident.arrivalTime.toDate(), 'HH:mm')}
                     </div>
                   )}
                 </div>

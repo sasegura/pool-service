@@ -37,17 +37,64 @@ import {
   getDay,
   isWithinInterval,
   parseISO,
+  setDay,
   startOfWeek,
 } from 'date-fns';
-import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import type { Locale } from 'date-fns';
+import { enUS, es } from 'date-fns/locale';
+import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { optimizeRoute } from '../services/geminiService';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
 /** Ocultar navegación Semana − / + junto al selector de fecha (reactivar cuando haga falta) */
 const SHOW_CALENDAR_WEEK_STEPPER = false;
+
+/** Nombre obligatorio: si viene vacío, se usa el día de la semana en inglés según la fecha de la ruta. */
+function resolveRouteNameForSave(
+  trimmedName: string,
+  isScheduled: boolean,
+  recurrence: Route['recurrence'] | undefined,
+  daysOfWeek: number[] | undefined,
+  dateStr: string | undefined,
+  startDateStr: string | undefined,
+  dateLocale: Locale
+): string {
+  if (trimmedName) return trimmedName;
+  if (isScheduled && recurrence === 'weekly' && daysOfWeek && daysOfWeek.length > 0) {
+    const d = setDay(new Date(), daysOfWeek[0], { weekStartsOn: 0 });
+    return format(d, 'EEEE', { locale: dateLocale });
+  }
+  const anchor = isScheduled ? startDateStr : dateStr;
+  if (anchor) {
+    const d = parseISO(anchor);
+    if (!Number.isNaN(d.getTime())) {
+      return format(d, 'EEEE', { locale: dateLocale });
+    }
+  }
+  return format(new Date(), 'EEEE', { locale: dateLocale });
+}
+
+/**
+ * Montar <Map> en el siguiente frame evita que la API use IntersectionObserver sobre un
+ * contenedor aún no válido (error "parameter 1 is not of type 'Element'").
+ */
+function DeferredMapMount({ children }: { children: React.ReactNode }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setReady(true));
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+  if (!ready) {
+    return <div className="h-full min-h-[240px] w-full bg-slate-100" aria-hidden />;
+  }
+  return <>{children}</>;
+}
 
 interface Pool {
   id: string;
@@ -95,7 +142,7 @@ function defaultNewRouteForm() {
     poolIds: [] as string[],
     routeName: '',
     noWorker: false,
-    isScheduled: false,
+    isScheduled: true,
   };
 }
 
@@ -108,6 +155,10 @@ function isLegacyUndated(r: Route) {
 }
 
 export default function RoutesPage() {
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
+  const weekdayInitials = t('routesPage.weekdayInitials', { returnObjects: true }) as string[];
+  const calendarWeekdayHeaders = t('routesPage.calendarWeekdays', { returnObjects: true }) as string[];
   const { user, loading: authLoading } = useAuth();
   const [pools, setPools] = useState<Pool[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
@@ -141,15 +192,43 @@ export default function RoutesPage() {
     [newRoute.isScheduled, newRoute.recurrence, newRoute.daysOfWeek]
   );
 
+  const recurrenceLabel = (r?: string) => {
+    switch (r) {
+      case 'none':
+      case undefined:
+        return t('routesPage.oneOff');
+      case 'daily':
+        return t('routesPage.recDaily');
+      case 'weekly':
+        return t('routesPage.recWeekly');
+      case 'bi-weekly':
+        return t('routesPage.recBiweekly');
+      case 'monthly':
+        return t('routesPage.recMonthly');
+      default:
+        return r || '';
+    }
+  };
+
   const selectedRoute = routes.find((r) => r.id === selectedRouteId);
   const selectedRoutePools = (selectedRoute?.poolIds || [])
     .map((id) => pools.find((p) => p.id === id))
     .filter(Boolean) as Pool[];
 
-  const mapCenter =
-    selectedRoutePools.length > 0 && selectedRoutePools[0].coordinates
-      ? selectedRoutePools[0].coordinates
-      : MIAMI_CENTER;
+  /** Mapa: todas las piscinas, o solo las de la ruta si hay una seleccionada */
+  const poolsForMapView = useMemo(() => {
+    if (selectedRouteId && selectedRoute) {
+      return selectedRoutePools;
+    }
+    return pools;
+  }, [selectedRouteId, selectedRoute, selectedRoutePools, pools]);
+
+  const mapViewCenter = useMemo(() => {
+    if (poolsForMapView.length > 0 && poolsForMapView[0].coordinates) {
+      return poolsForMapView[0].coordinates;
+    }
+    return MIAMI_CENTER;
+  }, [poolsForMapView]);
 
   const datedRoutes = useMemo(() => routes.filter(isDatedRoute), [routes]);
 
@@ -204,14 +283,14 @@ export default function RoutesPage() {
       const dateStr = format(day, 'yyyy-MM-dd');
       return {
         dateStr,
-        label: format(day, 'EEEE'),
+        label: format(day, 'EEEE', { locale: dateLocale }),
         routes: routes
           .filter((r) => routeMatchesDate(r, dateStr))
           .sort((a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0),
           ),
       };
     });
-  }, [routes, planningSelectedDate, routeMatchesDate]);
+  }, [routes, planningSelectedDate, routeMatchesDate, dateLocale]);
 
   const recurringDefinitions = useMemo(() => routes, [routes]);
 
@@ -279,25 +358,36 @@ export default function RoutesPage() {
   const handleAddRoute = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newRoute.poolIds.length === 0) {
-      toast.error('Selecciona al menos una piscina');
+      toast.error(t('routesPage.errSelectPool'));
       return;
     }
     if (!newRoute.isScheduled && !newRoute.date) {
-      toast.error('Indica la fecha del servicio');
+      toast.error(t('routesPage.errServiceDate'));
       return;
     }
     if (newRoute.isScheduled && newRoute.hasEndDate && !newRoute.endDate) {
-      toast.error('Indica la fecha fin o desmarca “Incluir fecha fin”');
+      toast.error(t('routesPage.errEndDateOrUncheck'));
       return;
     }
     if (weeklyRequiresAtLeastOneDay) {
-      toast.error('Selecciona al menos un día de la semana');
+      toast.error(t('routesPage.errWeekday'));
       return;
     }
     try {
+      const trimmedName = (newRoute.routeName || '').trim();
+      const routeName = resolveRouteNameForSave(
+        trimmedName,
+        newRoute.isScheduled,
+        newRoute.recurrence,
+        newRoute.daysOfWeek,
+        newRoute.date,
+        newRoute.startDate,
+        dateLocale
+      );
+
       const routeToSave: Record<string, unknown> = {
         poolIds: newRoute.poolIds,
-        routeName: newRoute.routeName || '',
+        routeName,
         workerId: newRoute.noWorker ? '' : newRoute.workerId,
         status: 'pending',
       };
@@ -320,29 +410,41 @@ export default function RoutesPage() {
 
       if (editingRouteId) {
         await updateDoc(doc(db, 'routes', editingRouteId), routeToSave);
-        toast.success('Ruta actualizada');
+        toast.success(t('routesPage.toastUpdated'));
       } else {
         routeToSave.createdAt = new Date().toISOString();
         routeToSave.order = datedRoutes.length;
         await addDoc(collection(db, 'routes'), routeToSave);
-        toast.success('Ruta guardada');
+        toast.success(t('routesPage.toastSaved'));
       }
       setNewRoute(defaultNewRouteForm());
       setShowRouteForm(false);
       setEditingRouteId(null);
     } catch {
-      toast.error('Error al guardar ruta');
+      toast.error(t('routesPage.toastSaveError'));
     }
   };
 
   const tryCloseRouteForm = useCallback(() => {
     if (weeklyRequiresAtLeastOneDay) {
-      toast.error('Selecciona al menos un día de la semana');
+      toast.error(t('routesPage.errWeekday'));
       return;
     }
     setShowRouteForm(false);
     setEditingRouteId(null);
-  }, [weeklyRequiresAtLeastOneDay]);
+  }, [weeklyRequiresAtLeastOneDay, t]);
+
+  useEffect(() => {
+    if (!showRouteForm) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowRouteForm(false);
+        setEditingRouteId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showRouteForm]);
 
   const handleEdit = (route: Route) => {
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -357,7 +459,7 @@ export default function RoutesPage() {
       poolIds: route.poolIds,
       routeName: route.routeName || '',
       noWorker: !route.workerId,
-      isScheduled: !!route.startDate,
+      isScheduled: true,
     });
     setEditingRouteId(route.id);
     setShowRouteForm(true);
@@ -382,17 +484,19 @@ export default function RoutesPage() {
 
   const formatRouteAssignmentHint = useCallback(
     (r: Route) => {
-      const name = (r.routeName || '').trim() || 'Ruta';
+      const name = (r.routeName || '').trim() || t('routesPage.routeFallback');
       const worker = workers.find((w) => w.id === r.workerId)?.name;
       const tech = worker ? ` · ${worker}` : '';
       if (r.date) return `${name} · ${r.date}${tech}`;
       if (r.startDate) {
-        const range = r.endDate ? `${r.startDate} → ${r.endDate}` : `desde ${r.startDate}`;
+        const range = r.endDate
+          ? `${r.startDate} ${t('routesPage.rangeArrow')} ${r.endDate}`
+          : t('routesPage.dateFrom', { date: r.startDate });
         return `${name} · ${range}${tech}`;
       }
       return `${name}${tech}`;
     },
-    [workers]
+    [workers, t]
   );
 
   const getPoolAssignmentHint = useCallback(
@@ -400,21 +504,26 @@ export default function RoutesPage() {
       const others = getOtherRoutesWithPool(poolId);
       if (others.length === 0) return null;
       if (others.length === 1) return formatRouteAssignmentHint(others[0]);
-      return `${others.length} rutas más: ${formatRouteAssignmentHint(others[0])}`;
+      return t('routesPage.moreRoutesHint', {
+        count: others.length,
+        hint: formatRouteAssignmentHint(others[0]),
+      });
     },
-    [getOtherRoutesWithPool, formatRouteAssignmentHint]
+    [getOtherRoutesWithPool, formatRouteAssignmentHint, t]
   );
 
-  const deleteRoute = async (id: string) => {
-    if (confirm('¿Eliminar esta ruta?')) {
+  const deleteRoute = async (id: string, routeName?: string) => {
+    const label = (routeName || '').trim() || t('routesPage.deleteFallback');
+    const shouldDelete = window.confirm(t('routesPage.deleteConfirm', { label }));
+    if (shouldDelete) {
       await deleteDoc(doc(db, 'routes', id));
-      toast.info('Ruta eliminada');
+      toast.info(t('routesPage.toastDeleted'));
     }
   };
 
   const handleOptimize = async () => {
     if (newRoute.poolIds.length < 2) {
-      toast.error('Selecciona al menos 2 piscinas para optimizar');
+      toast.error(t('routesPage.errOptimizeMin'));
       return;
     }
 
@@ -426,9 +535,9 @@ export default function RoutesPage() {
 
       const optimizedIds = await optimizeRoute(selectedPools);
       setNewRoute((prev) => ({ ...prev, poolIds: optimizedIds }));
-      toast.success('Ruta optimizada con IA');
+      toast.success(t('routesPage.toastOptimized'));
     } catch {
-      toast.error('Error al optimizar la ruta');
+      toast.error(t('routesPage.toastOptimizeError'));
     } finally {
       setIsOptimizing(false);
     }
@@ -498,15 +607,13 @@ export default function RoutesPage() {
   const applyWeeklyPatternToPlacements = () => {
     const start = parseISO(planFromDate);
     if (Number.isNaN(start.getTime())) {
-      toast.error('Fecha de inicio no válida');
+      toast.error(t('routesPage.errInvalidStart'));
       return;
     }
     const fromSourceWeek = buildByDowFromSourceWeek();
     const byDow = fromSourceWeek || buildByDowFromAllDatedRoutes();
     if (!byDow) {
-      toast.error(
-        'No hay rutas con fecha disponibles para generar planificación. Crea al menos una ruta con fecha.'
-      );
+      toast.error(t('routesPage.errNoDatedRoutes'));
       return;
     }
     const next: Record<string, string[]> = {};
@@ -519,9 +626,9 @@ export default function RoutesPage() {
     }
     setPlacementsByDate(next);
     if (fromSourceWeek) {
-      toast.success('Calendario rellenado con el patrón de la semana origen');
+      toast.success(t('routesPage.toastPatternFilled'));
     } else {
-      toast.success('Semana origen vacía: se usaron todas las rutas existentes por día de semana');
+      toast.success(t('routesPage.toastPatternFallback'));
     }
   };
 
@@ -568,7 +675,7 @@ export default function RoutesPage() {
   const savePlanFromCalendar = async () => {
     const entries = Object.entries(placementsByDate).filter(([, ids]) => ids.length > 0);
     if (entries.length === 0) {
-      toast.error('Coloca al menos una ruta en un día del calendario');
+      toast.error(t('routesPage.errPlaceRoute'));
       return;
     }
 
@@ -630,12 +737,15 @@ export default function RoutesPage() {
 
       await flush();
       toast.success(
-        `Plan guardado: ${created} rutas nuevas${skipped ? ` · ${skipped} ya existían` : ''}`
+        t('routesPage.toastPlanSavedFull', {
+          created,
+          skippedPart: skipped ? t('routesPage.toastPlanSkippedPart', { count: skipped }) : '',
+        })
       );
       setPlanCalendarOpen(false);
       setPlacementsByDate({});
     } catch {
-      toast.error('Error al guardar la planificación');
+      toast.error(t('routesPage.errSavePlan'));
     } finally {
       setIsSavingPlan(false);
     }
@@ -644,9 +754,9 @@ export default function RoutesPage() {
   const updatePlannedWorker = async (routeId: string, workerId: string) => {
     try {
       await updateDoc(doc(db, 'routes', routeId), { workerId });
-      toast.success('Técnico actualizado');
+      toast.success(t('routesPage.toastWorkerUpdated'));
     } catch {
-      toast.error('No se pudo actualizar el técnico');
+      toast.error(t('routesPage.toastWorkerError'));
     }
   };
 
@@ -664,7 +774,7 @@ export default function RoutesPage() {
       await updateDoc(doc(db, 'routes', a.id), { planningPriority: pb });
       await updateDoc(doc(db, 'routes', b.id), { planningPriority: pa });
     } catch {
-      toast.error('Error al reordenar');
+      toast.error(t('routesPage.toastReorderError'));
     }
   };
 
@@ -672,7 +782,7 @@ export default function RoutesPage() {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
         <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-amber-900 mb-2">Falta la API Key de Google Maps</h2>
+        <h2 className="text-xl font-bold text-amber-900 mb-2">{t('routesPage.missingMapsKey')}</h2>
       </div>
     );
   }
@@ -682,9 +792,9 @@ export default function RoutesPage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-black text-slate-900">Gestión de rutas</h2>
+            <h2 className="text-2xl font-black text-slate-900">{t('routesPage.title')}</h2>
             <p className="text-sm text-slate-500 mt-1">
-              Calendario semanal para planificar y ajuste manual por día en el dashboard del técnico.
+              {t('routesPage.subtitle')}
             </p>
           </div>
           <Button
@@ -696,7 +806,7 @@ export default function RoutesPage() {
             }}
             className="gap-1 shrink-0"
           >
-            <Plus className="w-4 h-4" /> Nueva ruta
+            <Plus className="w-4 h-4" /> {t('routesPage.newRoute')}
           </Button>
         </div>
 
@@ -716,48 +826,33 @@ export default function RoutesPage() {
                 type="button"
                 className="absolute right-3 top-3 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-800"
                 onClick={tryCloseRouteForm}
-                aria-label="Cerrar"
+                aria-label={t('routesPage.closeAria')}
               >
                 <X className="w-5 h-5" />
               </button>
               <form onSubmit={handleAddRoute} className="space-y-4 p-4 pr-14">
               <h3 id="route-form-title" className="font-bold text-blue-900">
-                {editingRouteId ? 'Editar ruta' : 'Nueva ruta'}
+                {editingRouteId ? t('routesPage.editRoute') : t('routesPage.newRouteForm')}
               </h3>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                  Nombre (opcional)
+                  {t('routesPage.nameOptional')}
                 </label>
                 <input
                   type="text"
                   className="w-full rounded-lg border-slate-200 p-2 text-sm bg-white"
-                  placeholder="Ej: Ruta norte, mantenimiento fuerte…"
+                  placeholder={t('routesPage.namePlaceholder')}
                   value={newRoute.routeName}
                   onChange={(e) => setNewRoute({ ...newRoute, routeName: e.target.value })}
                 />
               </div>
 
-              <div className="flex items-center gap-4 p-3 bg-white rounded-xl border border-blue-100">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newRoute.isScheduled}
-                    onChange={(e) => setNewRoute({ ...newRoute, isScheduled: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-bold text-slate-700">
-                    Definición recurrente (rango + reglas)
-                  </span>
-                </label>
-              </div>
-
-              {newRoute.isScheduled ? (
-                <div className="space-y-4 p-4 bg-white rounded-xl border border-blue-100">
+              <div className="space-y-4 p-4 bg-white rounded-xl border border-blue-100">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Fecha inicio
+                        {t('routesPage.startDate')}
                       </label>
                       <input
                         type="date"
@@ -784,13 +879,13 @@ export default function RoutesPage() {
                           className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          Incluir fecha fin
+                          {t('routesPage.includeEndDate')}
                         </span>
                       </label>
                       {newRoute.hasEndDate && (
                         <div className="space-y-1">
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Fecha fin
+                            {t('routesPage.endDate')}
                           </label>
                           <input
                             type="date"
@@ -807,7 +902,7 @@ export default function RoutesPage() {
 
                   <div className="space-y-1">
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Recurrencia
+                      {t('routesPage.recurrence')}
                     </label>
                     <select
                       className="w-full rounded-lg border-slate-200 p-2 text-sm"
@@ -816,21 +911,21 @@ export default function RoutesPage() {
                         setNewRoute({ ...newRoute, recurrence: e.target.value as Route['recurrence'] })
                       }
                     >
-                      <option value="none">Sin repetición (todo el rango)</option>
-                      <option value="daily">Diaria</option>
-                      <option value="weekly">Semanal</option>
-                      <option value="bi-weekly">Quincenal</option>
-                      <option value="monthly">Mensual</option>
+                      <option value="none">{t('routesPage.recNone')}</option>
+                      <option value="daily">{t('routesPage.recDaily')}</option>
+                      <option value="weekly">{t('routesPage.recWeekly')}</option>
+                      <option value="bi-weekly">{t('routesPage.recBiweekly')}</option>
+                      <option value="monthly">{t('routesPage.recMonthly')}</option>
                     </select>
                   </div>
 
                   {newRoute.recurrence === 'weekly' && (
                     <div className="space-y-2">
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Días de la semana
+                        {t('routesPage.weekdays')}
                       </label>
                       <div className="flex flex-wrap gap-2">
-                        {['D', 'L', 'M', 'X', 'J', 'V', 'S'].map((day, i) => (
+                        {weekdayInitials.map((day, i) => (
                           <button
                             key={i}
                             type="button"
@@ -855,58 +950,12 @@ export default function RoutesPage() {
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-500 uppercase">
-                        Técnico
-                      </label>
-                      <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={newRoute.noWorker}
-                          onChange={(e) => setNewRoute({ ...newRoute, noWorker: e.target.checked })}
-                          className="rounded border-slate-300"
-                        />
-                        Sin asignar
-                      </label>
-                    </div>
-                    <select
-                      className="w-full rounded-lg border-slate-200 p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400 bg-white"
-                      value={newRoute.workerId}
-                      onChange={(e) => setNewRoute({ ...newRoute, workerId: e.target.value })}
-                      disabled={newRoute.noWorker}
-                    >
-                      <option value="">Seleccionar…</option>
-                      {workers.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {w.name}
-                          {w.id === user?.uid ? ' (Tú)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-slate-500 uppercase">
-                      Fecha del servicio
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      className="w-full rounded-lg border-slate-200 p-2 text-sm bg-white"
-                      value={newRoute.date}
-                      onChange={(e) => setNewRoute({ ...newRoute, date: e.target.value })}
-                    />
-                  </div>
-                </div>
-              )}
 
               {newRoute.isScheduled && (
                 <div className="space-y-2 mb-4">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-bold text-slate-500 uppercase">
-                      Técnico
+                      {t('routesPage.technician')}
                     </label>
                     <label className="flex items-center gap-1 text-[10px] font-bold text-slate-400 cursor-pointer">
                       <input
@@ -915,7 +964,7 @@ export default function RoutesPage() {
                         onChange={(e) => setNewRoute({ ...newRoute, noWorker: e.target.checked })}
                         className="rounded border-slate-300"
                       />
-                      Sin asignar
+                      {t('routesPage.unassigned')}
                     </label>
                   </div>
                   <select
@@ -924,11 +973,11 @@ export default function RoutesPage() {
                     onChange={(e) => setNewRoute({ ...newRoute, workerId: e.target.value })}
                     disabled={newRoute.noWorker}
                   >
-                    <option value="">Seleccionar…</option>
+                    <option value="">{t('routesPage.selectPlaceholder')}</option>
                     {workers.map((w) => (
                       <option key={w.id} value={w.id}>
                         {w.name}
-                        {w.id === user?.uid ? ' (Tú)' : ''}
+                        {w.id === user?.uid ? t('routesPage.youSuffix') : ''}
                       </option>
                     ))}
                   </select>
@@ -937,7 +986,7 @@ export default function RoutesPage() {
 
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-500 uppercase">
-                  Piscinas (orden de parada)
+                  {t('routesPage.poolsStopOrder')}
                 </label>
                 <div className="flex items-center gap-2">
                   <button
@@ -951,7 +1000,7 @@ export default function RoutesPage() {
                     ) : (
                       <Sparkles className="w-3 h-3" />
                     )}
-                    Optimizar con IA
+                    {t('routesPage.optimizeAI')}
                   </button>
                   <div className="flex bg-white p-0.5 rounded-lg border border-slate-200">
                     <button
@@ -1009,14 +1058,14 @@ export default function RoutesPage() {
                               <div className="flex flex-col items-end gap-0.5 shrink-0">
                                 {isSelected && (
                                   <span className="text-[9px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded">
-                                    En esta ruta
+                                    {t('routesPage.onThisRoute')}
                                   </span>
                                 )}
                                 {otherHint && (
                                   <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded flex items-center gap-0.5 max-w-[140px]">
                                     <AlertCircle className="w-2.5 h-2.5 shrink-0" />
                                     <span className="truncate" title={otherHint}>
-                                      También en otra ruta
+                                      {t('routesPage.alsoOtherRoute')}
                                     </span>
                                   </span>
                                 )}
@@ -1031,7 +1080,7 @@ export default function RoutesPage() {
                   {newRoute.poolIds.length > 0 && (
                     <div className="space-y-2">
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Orden de paradas
+                        {t('routesPage.stopOrder')}
                       </label>
                       <div className="space-y-1">
                         {newRoute.poolIds.map((id, index) => {
@@ -1074,44 +1123,39 @@ export default function RoutesPage() {
                 </div>
               ) : (
                 <div className="h-64 rounded-xl overflow-hidden border border-slate-200 relative">
-                  <Map defaultCenter={MIAMI_CENTER} defaultZoom={11} mapId="route_creation_map">
-                    {pools.map((p) => {
-                      const otherHint = getPoolAssignmentHint(p.id);
-                      const isSelected = newRoute.poolIds.includes(p.id);
+                  <DeferredMapMount>
+                    <Map defaultCenter={MIAMI_CENTER} defaultZoom={11}>
+                      {pools.map((p) => {
+                        const otherHint = getPoolAssignmentHint(p.id);
+                        const isSelected = newRoute.poolIds.includes(p.id);
+                        const title = otherHint ? `${p.name} — ${otherHint}` : p.name;
+                        const labelText = isSelected
+                          ? String(newRoute.poolIds.indexOf(p.id) + 1)
+                          : otherHint
+                            ? '!'
+                            : undefined;
 
-                      return (
-                        <AdvancedMarker
-                          key={p.id}
-                          position={p.coordinates || MIAMI_CENTER}
-                          title={otherHint ? `${p.name}${otherHint ? ` — ${otherHint}` : ''}` : p.name}
-                          onClick={() => togglePoolInRoute(p.id)}
-                        >
-                          <Pin
-                            background={
-                              isSelected ? '#2563eb' : otherHint ? '#f59e0b' : '#94a3b8'
-                            }
-                            glyphColor={'#fff'}
-                            borderColor={'#000'}
-                          >
-                            {isSelected
-                              ? (newRoute.poolIds.indexOf(p.id) + 1).toString()
-                              : otherHint
-                                ? '!'
-                                : ''}
-                          </Pin>
-                        </AdvancedMarker>
-                      );
-                    })}
-                  </Map>
+                        return (
+                          <Marker
+                            key={p.id}
+                            position={p.coordinates || MIAMI_CENTER}
+                            title={title}
+                            onClick={() => togglePoolInRoute(p.id)}
+                            label={labelText}
+                          />
+                        );
+                      })}
+                    </Map>
+                  </DeferredMapMount>
                 </div>
               )}
 
               <div className="flex gap-2">
                 <Button type="submit" className="flex-1">
-                  {editingRouteId ? 'Actualizar' : 'Guardar'}
+                  {editingRouteId ? t('routesPage.update') : t('routesPage.save')}
                 </Button>
                 <Button type="button" variant="outline" onClick={tryCloseRouteForm}>
-                  Cancelar
+                  {t('common.cancel')}
                 </Button>
               </div>
               </form>
@@ -1124,7 +1168,7 @@ export default function RoutesPage() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex items-center gap-2 text-slate-900 font-bold">
                 <CalendarRange className="w-5 h-5 text-indigo-600" />
-                Calendario semanal (rutas existentes)
+                {t('routesPage.weeklyCalendarTitle')}
               </div>
               {SHOW_CALENDAR_WEEK_STEPPER && (
                 <div className="flex items-center gap-2">
@@ -1139,7 +1183,7 @@ export default function RoutesPage() {
                       }
                     }}
                   >
-                    Semana -
+                    {t('routesPage.weekMinus')}
                   </Button>
                   <input
                     type="date"
@@ -1158,14 +1202,13 @@ export default function RoutesPage() {
                       }
                     }}
                   >
-                    Semana +
+                    {t('routesPage.weekPlus')}
                   </Button>
                 </div>
               )}
             </div>
             <p className="text-xs text-slate-500">
-              Se muestra la planificación semanal con datos ya existentes. La generación automática
-              queda oculta temporalmente.
+              {t('routesPage.weeklyCalendarHelp')}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
@@ -1188,7 +1231,7 @@ export default function RoutesPage() {
                   </button>
                   <div className="space-y-1">
                     {day.routes.length === 0 ? (
-                      <p className="text-[10px] text-slate-400">Sin rutas</p>
+                      <p className="text-[10px] text-slate-400">{t('routesPage.noRoutesThatDay')}</p>
                     ) : (
                       day.routes.map((r) => {
                         const worker = workers.find((w) => w.id === r.workerId);
@@ -1196,14 +1239,16 @@ export default function RoutesPage() {
                           <button
                             key={r.id}
                             type="button"
-                            onClick={() => setSelectedRouteId(r.id)}
+                            onClick={() =>
+                              setSelectedRouteId((cur) => (cur === r.id ? null : r.id))
+                            }
                             className="w-full rounded bg-slate-100 px-1.5 py-1 text-left hover:bg-slate-200"
                           >
                             <div className="text-[10px] font-bold text-slate-700 truncate">
-                              {r.routeName || worker?.name || 'Ruta'}
+                              {r.routeName || worker?.name || t('routesPage.routeFallback')}
                             </div>
                             <div className="text-[9px] text-slate-500 truncate">
-                              {worker?.name || 'Sin técnico'}
+                              {worker?.name || t('routesPage.noTechnician')}
                             </div>
                           </button>
                         );
@@ -1269,14 +1314,16 @@ export default function RoutesPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteRoute(route.id)}
+                          onClick={() => deleteRoute(route.id, route.routeName)}
                           className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-red-600"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSelectedRouteId(route.id)}
+                          onClick={() =>
+                            setSelectedRouteId((cur) => (cur === route.id ? null : route.id))
+                          }
                           className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-blue-600"
                         >
                           <MapIcon className="w-4 h-4" />
@@ -1293,7 +1340,7 @@ export default function RoutesPage() {
         {recurringDefinitions.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">
-              Rutas (listado completo)
+              {t('routesPage.fullListTitle')}
             </h3>
             <div className="grid gap-2 sm:grid-cols-2">
               {recurringDefinitions.map((route) => {
@@ -1325,20 +1372,22 @@ export default function RoutesPage() {
                         </div>
                         <div className="min-w-0">
                           <h4 className="font-bold text-slate-900">
-                            {route.routeName || 'Recurrencia'}
+                            {route.routeName || t('routesPage.recurrenceFallback')}
                           </h4>
                           <p className="text-xs text-slate-500">
                             {route.startDate
                               ? `${route.startDate}${
-                                  route.endDate ? ` → ${route.endDate}` : ' · sin fecha fin'
+                                  route.endDate
+                                    ? ` ${t('routesPage.rangeArrow')} ${route.endDate}`
+                                    : ` · ${t('routesPage.noEndDate')}`
                                 }`
-                              : route.date || 'Sin fecha'}{' '}
-                            · {route.recurrence === 'none' ? 'Puntual' : route.recurrence} ·{' '}
-                            {worker?.name || 'Sin técnico'}
+                              : route.date || t('routesPage.noDate')}{' '}
+                            · {recurrenceLabel(route.recurrence)} ·{' '}
+                            {worker?.name || t('routesPage.noTechnician')}
                           </p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {routePools.length === 0 ? (
-                              <span className="text-[11px] text-slate-400">Sin piscinas asignadas</span>
+                              <span className="text-[11px] text-slate-400">{t('routesPage.noPoolsAssigned')}</span>
                             ) : (
                               routePools.map((pool, poolIndex) => (
                                 <span
@@ -1362,7 +1411,7 @@ export default function RoutesPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteRoute(route.id)}
+                          onClick={() => deleteRoute(route.id, route.routeName)}
                           className="p-2 text-slate-400 hover:text-red-600 rounded-lg hover:bg-white"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -1381,11 +1430,9 @@ export default function RoutesPage() {
             <div className="flex items-start gap-2">
               <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
               <div>
-                <h3 className="font-bold text-amber-950 text-sm">Rutas antiguas sin fecha</h3>
+                <h3 className="font-bold text-amber-950 text-sm">{t('routesPage.legacyTitle')}</h3>
                 <p className="text-xs text-amber-900/90 mt-1">
-                  Hay {legacyUndated.length} documento(s) sin fecha de servicio. Edita cada uno,
-                  asigna una <strong>fecha</strong> y guarda, o elimínalos. Ya no se usan como modelo
-                  para generar el plan.
+                  {t('routesPage.legacyBody', { count: legacyUndated.length })}
                 </p>
               </div>
             </div>
@@ -1396,14 +1443,19 @@ export default function RoutesPage() {
                   className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-white border border-amber-100 text-sm"
                 >
                   <span className="font-medium text-slate-800 truncate">
-                    {route.routeName || 'Sin nombre'} · {route.poolIds.length} piscinas
+                    {route.routeName || t('routesPage.unnamed')} · {t('routesPage.poolsCount', { count: route.poolIds.length })}
                   </span>
                   <div className="flex gap-1">
                     <Button type="button" size="sm" variant="outline" onClick={() => handleEdit(route)}>
-                      Editar
+                      {t('common.edit')}
                     </Button>
-                    <Button type="button" size="sm" variant="danger" onClick={() => deleteRoute(route.id)}>
-                      Eliminar
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="danger"
+                      onClick={() => deleteRoute(route.id, route.routeName)}
+                    >
+                      {t('common.delete')}
                     </Button>
                   </div>
                 </li>
@@ -1412,53 +1464,52 @@ export default function RoutesPage() {
           </Card>
         )}
 
-        {selectedRouteId && !showRouteForm && (
+        {!showRouteForm && (
           <Card className="p-4 border-blue-200 bg-white overflow-hidden">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-slate-900 flex items-center gap-2">
                 <MapIcon className="w-4 h-4 text-blue-600" />
-                Mapa:{' '}
-                {workers.find((w) => w.id === routes.find((r) => r.id === selectedRouteId)?.workerId)
-                  ?.name || 'Sin técnico'}
+                {t('routesPage.mapTitle')}{' '}
+                {selectedRouteId
+                  ? routes.find((r) => r.id === selectedRouteId)?.routeName ||
+                    routes.find((r) => r.id === selectedRouteId)?.id ||
+                    t('routesPage.routeFallback')
+                  : t('routesPage.overview')}
               </h3>
-              <Button variant="outline" size="sm" onClick={() => setSelectedRouteId(null)}>
-                Cerrar
-              </Button>
+              {selectedRouteId ? (
+                <Button variant="outline" size="sm" onClick={() => setSelectedRouteId(null)}>
+                  {t('routesPage.overview')}
+                </Button>
+              ) : null}
             </div>
             <div className="h-80 rounded-xl overflow-hidden border border-slate-200">
-              <Map
-                key={selectedRouteId}
-                defaultCenter={mapCenter}
-                defaultZoom={12}
-                mapId="route_view_map"
-              >
-                {selectedRoutePools.map((pool, index) => (
-                  <AdvancedMarker
-                    key={`${selectedRouteId}-${pool.id}`}
-                    position={pool.coordinates || MIAMI_CENTER}
-                  >
-                    <Pin background={'#2563eb'} glyphColor={'#fff'} borderColor={'#000'}>
-                      {(index + 1).toString()}
-                    </Pin>
-                  </AdvancedMarker>
-                ))}
-              </Map>
+              <DeferredMapMount>
+                <Map
+                  key={selectedRouteId ?? 'all-pools'}
+                  defaultCenter={mapViewCenter}
+                  defaultZoom={selectedRouteId ? 12 : 11}
+                >
+                  {poolsForMapView.map((pool, index) => (
+                    <Marker
+                      key={`${selectedRouteId ?? 'all'}-${pool.id}`}
+                      position={pool.coordinates || MIAMI_CENTER}
+                      title={pool.name}
+                      label={String(index + 1)}
+                    />
+                  ))}
+                </Map>
+              </DeferredMapMount>
             </div>
             <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {routes
-                .find((r) => r.id === selectedRouteId)
-                ?.poolIds.map((poolId, index) => {
-                  const pool = pools.find((p) => p.id === poolId);
-                  return (
-                    <div
-                      key={poolId}
-                      className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px]"
-                    >
-                      <span className="font-black text-blue-600 mr-1">#{index + 1}</span>
-                      <span className="font-bold text-slate-700">{pool?.name || '…'}</span>
-                    </div>
-                  );
-                })}
+              {poolsForMapView.map((pool, index) => (
+                <div
+                  key={pool.id}
+                  className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px]"
+                >
+                  <span className="font-black text-blue-600 mr-1">#{index + 1}</span>
+                  <span className="font-bold text-slate-700">{pool.name || '…'}</span>
+                </div>
+              ))}
             </div>
           </Card>
         )}
@@ -1479,7 +1530,7 @@ export default function RoutesPage() {
                 type="button"
                 className="absolute right-3 top-3 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-800"
                 onClick={() => setPlanCalendarOpen(false)}
-                aria-label="Cerrar"
+                aria-label={t('routesPage.closeAria')}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1487,36 +1538,33 @@ export default function RoutesPage() {
               <div className="p-5 sm:p-6 pr-14 space-y-4">
                 <div>
                   <h3 id="plan-calendar-title" className="text-lg font-black text-slate-900">
-                    Planificación en calendario
+                    {t('routesPage.planModalTitle')}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-                    1) Elige una ruta en la lista. 2) Pulsa el día del calendario donde debe
-                    ejecutarla el técnico. 3) Repite y pulsa <strong>Guardar plan</strong>. Las
-                    instancias nuevas reutilizan piscinas y técnico de la ruta origen (puedes
-                    cambiarlo después en “Ajuste manual del día”).
+                    {t('routesPage.planModalIntro')}
                   </p>
                 </div>
 
                 {pickedSourceRouteId && (
                   <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
-                    <span className="font-bold">Ruta seleccionada:</span>
+                    <span className="font-bold">{t('routesPage.selectedRoute')}</span>
                     <span className="truncate">
                       {routes.find((r) => r.id === pickedSourceRouteId)?.routeName ||
                         routes.find((r) => r.id === pickedSourceRouteId)?.id}
                     </span>
-                    <span className="text-indigo-600 shrink-0">→ toca un día</span>
+                    <span className="text-indigo-600 shrink-0">{t('routesPage.tapDay')}</span>
                   </div>
                 )}
 
                 <div className="grid gap-6 lg:grid-cols-12">
                   <div className="lg:col-span-4 space-y-2">
                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Rutas ({assignableRoutes.length})
+                      {t('routesPage.routesCount', { count: assignableRoutes.length })}
                     </h4>
                     <div className="max-h-[min(420px,50vh)] overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
                       {assignableRoutes.length === 0 ? (
                         <p className="p-4 text-sm text-slate-500">
-                          No hay rutas con fecha. Crea rutas con día concreto primero.
+                          {t('routesPage.noDatedRoutesHint')}
                         </p>
                       ) : (
                         assignableRoutes.map((r) => {
@@ -1535,10 +1583,10 @@ export default function RoutesPage() {
                               )}
                             >
                               <div className="font-bold text-slate-900 truncate">
-                                {r.routeName || w?.name || 'Ruta'}
+                                {r.routeName || w?.name || t('routesPage.routeFallback')}
                               </div>
                               <div className="text-[11px] text-slate-500 mt-0.5">
-                                {r.date} · {r.poolIds.length} piscinas · {w?.name || 'Sin técnico'}
+                                {r.date} · {t('routesPage.poolsCount', { count: r.poolIds.length })} · {w?.name || t('routesPage.noTechnician')}
                               </div>
                             </button>
                           );
@@ -1549,18 +1597,17 @@ export default function RoutesPage() {
 
                   <div className="lg:col-span-8 space-y-3 min-w-0">
                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Calendario (semanas lun–dom)
+                      {t('routesPage.calendarWeeksTitle')}
                     </h4>
                     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-3 space-y-4">
                       <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-400">
-                        {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((h) => (
+                        {calendarWeekdayHeaders.map((h) => (
                           <div key={h}>{h}</div>
                         ))}
                       </div>
                       {calendarWeeks.length === 0 ? (
                         <p className="text-sm text-slate-500 py-4 text-center">
-                          Ajusta “Desde” y “Días hacia adelante” en el panel izquierdo y vuelve a
-                          abrir el calendario.
+                          {t('routesPage.adjustPanelHint')}
                         </p>
                       ) : (
                         calendarWeeks.map((week) => (
@@ -1609,7 +1656,7 @@ export default function RoutesPage() {
                                         const label =
                                           src?.routeName ||
                                           workers.find((x) => x.id === src?.workerId)?.name ||
-                                          'Ruta';
+                                          t('routesPage.routeFallback');
                                         return (
                                           <div
                                             key={`${cell.dateStr}-${sid}`}
@@ -1625,7 +1672,7 @@ export default function RoutesPage() {
                                                 e.stopPropagation();
                                                 removePlacementFromDate(cell.dateStr, sid);
                                               }}
-                                              aria-label="Quitar"
+                                              aria-label={t('routesPage.removeAria')}
                                             >
                                               <X className="w-3 h-3" />
                                             </button>
@@ -1646,7 +1693,7 @@ export default function RoutesPage() {
 
                 <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                   <Button type="button" variant="secondary" onClick={applyWeeklyPatternToPlacements}>
-                    Rellenar con patrón semanal
+                    {t('routesPage.fillWeeklyPattern')}
                   </Button>
                   <Button
                     type="button"
@@ -1655,10 +1702,10 @@ export default function RoutesPage() {
                     disabled={isSavingPlan}
                     isLoading={isSavingPlan}
                   >
-                    Guardar plan
+                    {t('routesPage.savePlan')}
                   </Button>
                   <Button type="button" variant="outline" onClick={() => setPlanCalendarOpen(false)}>
-                    Cerrar sin guardar
+                    {t('routesPage.closeWithoutSave')}
                   </Button>
                 </div>
               </div>

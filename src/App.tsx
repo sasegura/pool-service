@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import Login from './pages/Login';
 import WorkerDashboard from './pages/WorkerDashboard';
 import AdminOverview from './pages/AdminOverview';
@@ -14,8 +15,9 @@ import Layout from './components/Layout';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'admin' | 'worker' | 'client' }> = ({ children, requiredRole }) => {
   const { role, loading } = useAuth();
+  const { t } = useTranslation();
 
-  if (loading) return <div className="flex items-center justify-center h-screen">Cargando...</div>;
+  if (loading) return <div className="flex items-center justify-center h-screen">{t('app.loading')}</div>;
   if (requiredRole && role !== requiredRole) return <Navigate to="/" />;
 
   return <>{children}</>;
@@ -23,11 +25,12 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'admi
 
 const DashboardSwitcher = () => {
   const { role, loading } = useAuth();
-  if (loading) return <div className="p-8 text-center">Cargando...</div>;
+  const { t } = useTranslation();
+  if (loading) return <div className="p-8 text-center">{t('app.loading')}</div>;
   if (role === 'admin') return <AdminOverview />;
   if (role === 'worker') return <WorkerDashboard />;
   if (role === 'client') return <ClientDashboard />;
-  return <div className="p-8 text-center text-red-500 font-bold">Error: Rol no definido</div>;
+  return <div className="p-8 text-center text-red-500 font-bold">{t('common.roleUndefined')}</div>;
 };
 
 export default function App() {

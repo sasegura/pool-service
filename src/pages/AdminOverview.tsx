@@ -6,7 +6,6 @@ import { Card, Button } from '../components/ui/Common';
 import { Waves, Users, CheckCircle, AlertCircle, Clock, MapPin, Calendar as CalendarIcon, Navigation, Edit2, Check, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { useAuth } from '../contexts/AuthContext';
@@ -139,9 +138,9 @@ export default function AdminOverview() {
         date: editData.date
       });
       setEditingRouteId(null);
-      toast.success('Ruta actualizada');
+      toast.success(t('admin.toastRouteUpdated'));
     } catch (error) {
-      toast.error('Error al actualizar ruta');
+      toast.error(t('admin.toastRouteUpdateError'));
     }
   };
 
@@ -227,12 +226,12 @@ export default function AdminOverview() {
                 <h3 className="text-lg font-bold text-slate-900">{t('admin.routeStatus')}</h3>
                 <p className="text-xs text-slate-500">
                   {selectedDate === format(new Date(), 'yyyy-MM-dd') 
-                    ? 'Progreso en tiempo real de todas las rutas activas hoy' 
-                    : `Historial de rutas para el día ${format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy')}`}
+                    ? t('admin.routesLiveToday')
+                    : t('admin.routesHistoryForDay', { date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy') })}
                 </p>
               </div>
               <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-slate-400">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> En Vivo
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> {t('admin.live')}
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -240,9 +239,9 @@ export default function AdminOverview() {
                 <thead>
                   <tr className="bg-slate-50 text-[10px] uppercase tracking-wider font-bold text-slate-500 border-b border-slate-100">
                     <th className="px-6 py-3">{t('common.worker')}</th>
-                    <th className="px-6 py-3">Horario</th>
-                    <th className="px-6 py-3">Última Parada</th>
-                    <th className="px-6 py-3">Progreso</th>
+                    <th className="px-6 py-3">{t('admin.schedule')}</th>
+                    <th className="px-6 py-3">{t('admin.lastStop')}</th>
+                    <th className="px-6 py-3">{t('admin.progress')}</th>
                     <th className="px-6 py-3">{t('common.status')}</th>
                   </tr>
                 </thead>
@@ -250,7 +249,7 @@ export default function AdminOverview() {
                   {routes.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">
-                        No hay rutas asignadas para el día {format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy')}
+                        {t('admin.noRoutesForDay', { date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy') })}
                       </td>
                     </tr>
                   ) : (
@@ -277,7 +276,7 @@ export default function AdminOverview() {
                                 <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
                                   {users[route.workerId]?.charAt(0) || '?'}
                                 </div>
-                                <span className="text-sm font-bold text-slate-700">{users[route.workerId] || 'Cargando...'}</span>
+                                <span className="text-sm font-bold text-slate-700">{users[route.workerId] || t('admin.loading')}</span>
                               </div>
                             )}
                           </td>
@@ -303,7 +302,7 @@ export default function AdminOverview() {
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2 text-sm text-slate-600">
                               <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                              {route.lastPoolId ? pools[route.lastPoolId] : <span className="text-slate-300 italic">Sin actividad</span>}
+                              {route.lastPoolId ? pools[route.lastPoolId] : <span className="text-slate-300 italic">{t('admin.noActivity')}</span>}
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -331,7 +330,7 @@ export default function AdminOverview() {
                                 route.status === 'in-progress' ? "bg-blue-100 text-blue-700" :
                                 "bg-slate-100 text-slate-600"
                               )}>
-                                {isIncident ? 'Incidencia' : route.status}
+                                {isIncident ? t('admin.incidentLabel') : t(`common.${route.status === 'in-progress' ? 'inProgress' : route.status}`)}
                               </span>
                               {isEditing ? (
                                 <div className="flex gap-1">
@@ -363,7 +362,7 @@ export default function AdminOverview() {
           <Card className="overflow-hidden border-slate-200">
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-blue-600" /> Ubicación en Tiempo Real
+                <Navigation className="w-4 h-4 text-blue-600" /> {t('admin.mapRealtimeTitle')}
               </h3>
             </div>
             <div className="h-[400px] relative">
@@ -374,16 +373,16 @@ export default function AdminOverview() {
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-slate-400 text-xs text-center p-8">
                   <AlertCircle className="w-8 h-8 mb-2 text-amber-500" />
-                  <p className="font-bold text-slate-600 mb-1">Mapa Deshabilitado</p>
-                  <p>Configura <strong>VITE_GOOGLE_MAPS_API_KEY</strong> en Secretos para ver el seguimiento en tiempo real.</p>
+                  <p className="font-bold text-slate-600 mb-1">{t('admin.mapDisabledTitle')}</p>
+                  <p>{t('admin.mapDisabledBody')}</p>
                 </div>
               )}
             </div>
             <div className="p-4 bg-white">
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Técnicos Activos</h4>
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">{t('admin.activeTechnicians')}</h4>
               <div className="space-y-3">
                 {liveWorkers.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">No hay técnicos con GPS activo en este momento.</p>
+                  <p className="text-xs text-slate-400 italic">{t('admin.noGpsWorkers')}</p>
                 ) : (
                   liveWorkers.map(worker => (
                     <div key={worker.id} className="flex items-center justify-between">
@@ -392,7 +391,7 @@ export default function AdminOverview() {
                         <span className="text-xs font-bold text-slate-700">{worker.name}</span>
                       </div>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        {worker.lastActive?.toDate ? format(worker.lastActive.toDate(), 'HH:mm:ss') : 'Hace un momento'}
+                        {worker.lastActive?.toDate ? format(worker.lastActive.toDate(), 'HH:mm:ss') : t('admin.momentAgo')}
                       </span>
                     </div>
                   ))

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { useTranslation } from 'react-i18next';
 
 enum OperationType {
   CREATE = 'create',
@@ -75,6 +76,7 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t } = useTranslation();
   const [role, setRoleState] = useState<'admin' | 'worker' | 'client' | null>('admin');
   const [loading, setLoading] = useState(true);
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -83,10 +85,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const uid = role === 'worker' ? 'demo-worker-id' : (role === 'client' ? 'demo-client-id' : (authUser?.uid || 'demo-fallback-uid'));
     return {
       uid,
-      displayName: role === 'worker' ? 'Usuario Demo (Técnico)' : (role === 'client' ? 'Cliente Demo' : 'Usuario Demo (Admin)'),
+      displayName:
+        role === 'worker'
+          ? t('demo.userWorker')
+          : role === 'client'
+            ? t('demo.userClient')
+            : t('demo.userAdmin'),
       email: authUser?.email || 'demo@example.com'
     };
-  }, [authUser?.uid, role]);
+  }, [authUser?.uid, role, t]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -175,11 +182,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const poolsForRoute = await getDocs(collection(db, 'pools'));
               const poolIds = poolsForRoute.docs.map(d => d.id);
               if (poolIds.length > 0) {
-                const t = new Date();
-                t.setDate(t.getDate() + 1);
-                const dateStr = t.toISOString().slice(0, 10);
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const dateStr = tomorrow.toISOString().slice(0, 10);
                 await addDoc(collection(db, 'routes'), {
-                  routeName: 'Ruta de prueba (mañana)',
+                  routeName: t('demo.seedRouteName'),
                   poolIds: poolIds,
                   date: dateStr,
                   workerId: '',
@@ -207,14 +214,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             };
             await seedDemoUser('demo-worker-id', {
-              name: 'Técnico de Pruebas',
+              name: t('demo.seedWorkerName'),
               email: 'worker@demo.com',
               role: 'worker',
               uid: 'demo-worker-id',
               createdAt: new Date().toISOString()
             });
             await seedDemoUser('demo-client-id', {
-              name: 'Cliente de Pruebas',
+              name: t('demo.seedClientName'),
               email: 'client@demo.com',
               role: 'client',
               uid: 'demo-client-id',
@@ -230,7 +237,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       seedData();
     }
-  }, [role, authUser?.uid]);
+  }, [role, authUser, t]);
 
   const setRole = (newRole: 'admin' | 'worker' | 'client') => {
     setRoleState(newRole);

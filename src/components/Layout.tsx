@@ -41,7 +41,7 @@ export default function Layout() {
             <div className="bg-blue-600 p-1.5 rounded-lg">
               <Waves className="text-white w-5 h-5" />
             </div>
-            <h1 className="font-bold text-slate-900 tracking-tight hidden sm:block">Miami Pool Care</h1>
+            <h1 className="font-bold text-slate-900 tracking-tight hidden sm:block">{t('layout.brandName')}</h1>
           </div>
           
           <div className="flex items-center gap-4">
@@ -99,12 +99,12 @@ export default function Layout() {
                 role === r ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
               )}
             >
-              {r}
+              {t(`common.${r}`)}
             </button>
           ))}
         </div>
         <p className="text-xs text-slate-400 font-medium">
-          &copy; 2026 Miami Pool Care. Modo Demo (Sin Autenticación)
+          {t('layout.footerDemo')}
         </p>
       </footer>
     </div>

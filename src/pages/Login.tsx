@@ -5,20 +5,22 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Card } from '../components/ui/Common';
 import { Waves, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
-      toast.success('Sesión iniciada correctamente');
+      toast.success(t('login.toastSuccess'));
       navigate('/');
     } catch (error) {
       console.error(error);
-      toast.error('Error al iniciar sesión con Google');
+      toast.error(t('login.toastError'));
     } finally {
       setLoading(false);
     }
@@ -31,8 +33,8 @@ export default function Login() {
           <Waves className="text-white w-12 h-12" />
         </div>
         
-        <h1 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Miami Pool Care</h1>
-        <p className="text-slate-500 mb-8">Gestión profesional de mantenimiento y limpieza de piscinas.</p>
+        <h1 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">{t('login.title')}</h1>
+        <p className="text-slate-500 mb-8">{t('login.subtitle')}</p>
         
         <Button 
           variant="primary" 
@@ -42,11 +44,11 @@ export default function Login() {
           className="flex gap-3"
         >
           <LogIn className="w-6 h-6" />
-          Entrar con Google
+          {t('login.signInGoogle')}
         </Button>
         
         <p className="mt-8 text-xs text-slate-400 max-w-[280px]">
-          Solo personal autorizado puede acceder al sistema. Si no tienes acceso, contacta con administración.
+          {t('login.footer')}
         </p>
       </Card>
     </div>

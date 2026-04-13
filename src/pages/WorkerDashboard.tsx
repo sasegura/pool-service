@@ -7,7 +7,7 @@ import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
 import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle } from 'lucide-react';
 import { format, parseISO, getDay, addDays, startOfDay } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { es, enUS } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
@@ -42,6 +42,9 @@ interface Route {
   templateId?: string;
   planningPriority?: number;
 }
+
+const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T> =>
+  Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
 
 function WorkerRouteMap({
   poolIds,
@@ -108,7 +111,8 @@ function WorkerRouteMap({
 
 export default function WorkerDashboard() {
   const { user, loading: authLoading } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [hasOtherRoutes, setHasOtherRoutes] = useState(false);
@@ -197,10 +201,6 @@ export default function WorkerDashboard() {
             ...assignedRoute,
             status: 'pending',
             completedPools: [],
-            startTime: undefined,
-            endTime: undefined,
-            lastPoolId: undefined,
-            lastStatus: undefined,
             date: today,
             isVirtual: true
           } as any);
@@ -293,9 +293,9 @@ export default function WorkerDashboard() {
       delete (newRouteInstance as any).id; // Remove template ID
 
       await addDoc(collection(db, 'routes'), newRouteInstance);
-      toast.success('Ruta asignada para hoy');
+      toast.success(t('worker.toastRouteAssigned'));
     } catch (e) {
-      toast.error('Error al asignar la ruta');
+      toast.error(t('worker.toastRouteAssignError'));
     }
   };
 
@@ -305,28 +305,29 @@ export default function WorkerDashboard() {
     try {
       if ((todayRoute as any).isVirtual) {
         // Instantiate the weekly/scheduled route for today
-        const newInstance = {
+        const newInstance = removeUndefinedFields({
           ...todayRoute,
           status: 'in-progress',
           startTime: new Date().toISOString(),
           completedPools: [],
           templateId: todayRoute.id,
           createdAt: serverTimestamp()
-        };
+        });
         delete (newInstance as any).id;
         delete (newInstance as any).isVirtual;
 
         await addDoc(collection(db, 'routes'), newInstance);
-        toast.success('Jornada iniciada (Nueva instancia diaria)');
+        toast.success(t('worker.toastDayStartedNew'));
       } else {
         await updateDoc(doc(db, 'routes', todayRoute.id), { 
           status: 'in-progress',
           startTime: todayRoute.startTime || new Date().toISOString()
         });
-        toast.info(todayRoute.status === 'completed' ? 'Jornada reanudada' : 'Jornada iniciada');
+        toast.info(todayRoute.status === 'completed' ? t('worker.toastDayResumed') : t('worker.toastDayStarted'));
       }
     } catch (e) {
-      toast.error('Error al iniciar jornada');
+      console.error('Error starting day:', e);
+      toast.error(t('worker.toastStartError'));
     }
   };
 
@@ -336,13 +337,13 @@ export default function WorkerDashboard() {
       status: 'completed',
       endTime: new Date().toISOString()
     });
-    toast.success('Jornada finalizada. ¡Buen trabajo!');
+    toast.success(t('worker.toastDayFinished'));
   };
 
   const handleArrive = (index: number) => {
     setActivePoolIndex(index);
     setVisitStatus('arrived');
-    toast.success('Llegada registrada');
+    toast.success(t('worker.toastArrival'));
   };
 
   const handleFinish = async (status: 'ok' | 'issue') => {
@@ -376,7 +377,7 @@ export default function WorkerDashboard() {
         });
       }
 
-      toast.success(status === 'ok' ? 'Servicio finalizado correctamente' : 'Incidencia reportada');
+      toast.success(status === 'ok' ? t('worker.toastServiceOk') : t('worker.toastIncident'));
       
       // Reset state
       setVisitStatus('idle');
@@ -388,7 +389,7 @@ export default function WorkerDashboard() {
       // Check if all done
       // (In a real app, we'd track progress more granularly)
     } catch (e) {
-      toast.error('Error al guardar el registro');
+      toast.error(t('worker.toastSaveError'));
     }
   };
 
@@ -398,22 +399,22 @@ export default function WorkerDashboard() {
 
   if (authLoading || loading) return <div className="p-12 text-center flex flex-col items-center gap-4">
     <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-    <p className="text-slate-500 font-medium">Cargando tu jornada...</p>
+    <p className="text-slate-500 font-medium">{t('worker.loadingShift')}</p>
   </div>;
 
-  if (!user) return <div className="p-12 text-center text-red-500 font-bold">Error: Usuario no encontrado</div>;
+  if (!user) return <div className="p-12 text-center text-red-500 font-bold">{t('common.userNotFound')}</div>;
 
   if (!todayRoute) {
     return (
       <div className="space-y-6">
         <header>
-          <h2 className="text-2xl font-black text-slate-900">Mi Jornada</h2>
-          <p className="text-slate-500">Selecciona una ruta para comenzar hoy</p>
+          <h2 className="text-2xl font-black text-slate-900">{t('worker.myShift')}</h2>
+          <p className="text-slate-500">{t('worker.pickRouteTitle')}</p>
         </header>
 
         {availableRoutes.length > 0 ? (
           <div className="grid gap-4">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Rutas Disponibles</h3>
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">{t('worker.availableRoutes')}</h3>
             {availableRoutes.map(route => (
               <Card key={route.id} className="p-5 hover:border-blue-300 transition-all group">
                 <div className="flex justify-between items-center">
@@ -422,12 +423,12 @@ export default function WorkerDashboard() {
                       <MapIcon className="w-6 h-6" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-900 text-lg">{route.routeName || 'Ruta sin nombre'}</h4>
-                      <p className="text-sm text-slate-500">{route.poolIds.length} piscinas en esta ruta</p>
+                      <h4 className="font-bold text-slate-900 text-lg">{route.routeName || t('worker.unnamedRoute')}</h4>
+                      <p className="text-sm text-slate-500">{t('worker.poolsInRoute', { count: route.poolIds.length })}</p>
                     </div>
                   </div>
                   <Button onClick={() => handlePickRoute(route.id)} className="gap-2">
-                    Elegir esta ruta
+                    {t('worker.chooseRoute')}
                   </Button>
                 </div>
               </Card>
@@ -441,41 +442,41 @@ export default function WorkerDashboard() {
             <h2 className="text-xl font-bold text-slate-900 mb-2">{t('worker.noRouteToday')}</h2>
             {hasOtherRoutes ? (
               <div className="space-y-4 w-full max-w-md">
-                <p className="text-slate-500">Tienes rutas asignadas para otros días, pero ninguna para hoy ({format(new Date(), 'dd/MM/yyyy')}).</p>
+                <p className="text-slate-500">{t('worker.otherDaysHint', { date: format(new Date(), 'dd/MM/yyyy') })}</p>
                 <Button variant="outline" onClick={() => setShowAllRoutes(!showAllRoutes)} className="w-full">
-                  {showAllRoutes ? 'Ocultar otras rutas' : 'Ver mis rutas de otros días'}
+                  {showAllRoutes ? t('worker.hideOtherRoutes') : t('worker.showOtherRoutes')}
                 </Button>
                 {showAllRoutes && (
                   <div className="grid gap-2 text-left">
                     {allMyRoutes.filter(r => r.date !== format(new Date(), 'yyyy-MM-dd')).map(r => (
                       <div key={r.id} className="p-3 bg-white border rounded-lg text-sm flex justify-between items-center shadow-sm">
                         <div>
-                          <div className="font-bold text-slate-900">{r.routeName || 'Ruta'}</div>
-                          <div className="text-xs text-slate-500">{r.date || 'Sin fecha'} • {r.poolIds.length} piscinas</div>
+                          <div className="font-bold text-slate-900">{r.routeName || t('worker.routeFallback')}</div>
+                          <div className="text-xs text-slate-500">{r.date || t('worker.noDate')} • {t('worker.poolsCountShort', { count: r.poolIds.length })}</div>
                         </div>
-                        <Button size="sm" onClick={() => handlePickRoute(r.id)} className="h-8 px-3 text-xs">Traer a hoy</Button>
+                        <Button size="sm" onClick={() => handlePickRoute(r.id)} className="h-8 px-3 text-xs">{t('worker.bringToToday')}</Button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
             ) : (
-              <p className="text-slate-500">No hay rutas disponibles para elegir en este momento.</p>
+              <p className="text-slate-500">{t('worker.noRoutesAvailable')}</p>
             )}
             
             <div className="mt-12 p-4 bg-slate-50 rounded-xl border border-slate-200 text-left w-full max-w-md">
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Información de Diagnóstico</h4>
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">{t('worker.diagnosticsTitle')}</h4>
               <div className="space-y-2 text-[10px] font-mono text-slate-500">
                 <div className="flex justify-between border-b border-slate-100 pb-1">
-                  <span>Mi UID:</span>
+                  <span>{t('worker.myUid')}</span>
                   <span className="text-slate-900 font-bold">{user.uid}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-100 pb-1">
-                  <span>Fecha Hoy:</span>
+                  <span>{t('worker.todayDate')}</span>
                   <span className="text-slate-900 font-bold">{format(new Date(), 'yyyy-MM-dd')}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-100 pb-1">
-                  <span>Rutas totales:</span>
+                  <span>{t('worker.totalRoutes')}</span>
                   <span className="text-slate-900 font-bold">{allMyRoutes.length}</span>
                 </div>
               </div>
@@ -492,9 +493,9 @@ export default function WorkerDashboard() {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
         <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-amber-900 mb-2">Falta la API Key de Google Maps</h2>
+        <h2 className="text-xl font-bold text-amber-900 mb-2">{t('worker.missingMapsKeyTitle')}</h2>
         <p className="text-sm text-amber-700">
-          Por favor, configura tu <strong>VITE_GOOGLE_MAPS_API_KEY</strong> en el panel de Secretos de AI Studio para habilitar el seguimiento de rutas.
+          {t('worker.missingMapsKeyBody')}
         </p>
       </div>
     );
@@ -506,17 +507,17 @@ export default function WorkerDashboard() {
         <header className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-black text-slate-900">{t('worker.myRoute')}</h2>
-            <p className="text-slate-500">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</p>
+            <p className="text-slate-500">{format(new Date(), i18n.language?.startsWith('en') ? 'EEEE, MMMM d, yyyy' : "EEEE, d 'de' MMMM", { locale: dateLocale })}</p>
           </div>
           <div className="flex gap-2">
             {todayRoute.status === 'pending' && (
               <Button variant="primary" onClick={handleStartDay} className="gap-2">
-                <Play className="w-4 h-4" /> Comenzar Jornada
+                <Play className="w-4 h-4" /> {t('worker.startDay')}
               </Button>
             )}
             {todayRoute.status === 'in-progress' && (
               <Button variant="danger" onClick={handleEndDay} className="gap-2 shadow-lg shadow-red-100">
-                Finalizar Jornada
+                {t('worker.endDay')}
               </Button>
             )}
             {todayRoute.status === 'completed' && (
@@ -524,11 +525,11 @@ export default function WorkerDashboard() {
                 <div className="flex gap-2">
                   {(todayRoute.completedPools?.length || 0) < todayRoute.poolIds.length && (
                     <Button variant="primary" onClick={handleStartDay} size="sm" className="gap-2">
-                      <Play className="w-3 h-3" /> Continuar Jornada
+                      <Play className="w-3 h-3" /> {t('worker.continueDay')}
                     </Button>
                   )}
                   <div className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Finalizada
+                    <CheckCircle2 className="w-4 h-4" /> {t('worker.finished')}
                   </div>
                 </div>
                 {todayRoute.startTime && todayRoute.endTime && (
@@ -556,9 +557,9 @@ export default function WorkerDashboard() {
                 <MapIcon className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Progreso</div>
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t('worker.progress')}</div>
                 <div className="text-sm font-black text-slate-900">
-                  {todayRoute.completedPools?.length || 0} / {todayRoute.poolIds.length} Piscinas
+                  {t('worker.poolsProgress', { done: todayRoute.completedPools?.length || 0, total: todayRoute.poolIds.length })}
                 </div>
               </div>
             </div>
@@ -582,7 +583,7 @@ export default function WorkerDashboard() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <span className="inline-block bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase mb-1">
-                      Piscina {index + 1}
+                      {t('worker.poolNumber', { n: index + 1 })}
                     </span>
                     <h3 className="text-lg font-bold text-slate-900">{pool.name}</h3>
                     <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
@@ -610,7 +611,7 @@ export default function WorkerDashboard() {
                       {isCompleted ? (
                         <div className="w-full h-12 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center gap-2 text-emerald-600 font-bold">
                           <CheckCircle2 className="w-5 h-5" />
-                          Servicio Completado
+                          {t('worker.serviceCompleted')}
                         </div>
                       ) : (
                         <Button 
@@ -619,7 +620,7 @@ export default function WorkerDashboard() {
                           onClick={() => handleArrive(index)}
                           disabled={todayRoute.status === 'pending' || todayRoute.status === 'completed'}
                         >
-                          Llegué
+                          {t('worker.arrived')}
                         </Button>
                       )}
                     </motion.div>
@@ -639,7 +640,7 @@ export default function WorkerDashboard() {
                             onClick={() => handleFinish('ok')}
                           >
                             <CheckCircle2 className="w-6 h-6" />
-                            <span>Todo OK</span>
+                            <span>{t('worker.allOk')}</span>
                           </Button>
                           <Button 
                             variant="danger" 
@@ -647,16 +648,16 @@ export default function WorkerDashboard() {
                             onClick={() => setIncidenceMode(true)}
                           >
                             <AlertTriangle className="w-6 h-6" />
-                            <span>Incidencia</span>
+                            <span>{t('worker.incident')}</span>
                           </Button>
                         </div>
                       ) : (
                         <div className="space-y-3 bg-red-50 p-4 rounded-xl border border-red-100">
-                          <label className="text-sm font-bold text-red-900">Detalles de la incidencia</label>
+                          <label className="text-sm font-bold text-red-900">{t('worker.incidentDetails')}</label>
                           <textarea 
                             className="w-full rounded-lg border-red-200 p-3 text-sm focus:ring-red-500 focus:border-red-500"
                             rows={3}
-                            placeholder="Describe el problema..."
+                            placeholder={t('worker.describeProblem')}
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
                           />
@@ -668,12 +669,12 @@ export default function WorkerDashboard() {
                               onChange={(e) => setNotifyClient(e.target.checked)}
                             />
                             <span className="text-xs font-bold text-red-800 group-hover:text-red-900 transition-colors">
-                              Notificar al cliente (mostrar en su historial)
+                              {t('worker.notifyClientHistory')}
                             </span>
                           </label>
                           <div className="flex gap-2">
-                            <Button variant="outline" className="flex-1" onClick={() => setIncidenceMode(false)}>Cancelar</Button>
-                            <Button variant="danger" className="flex-1" onClick={() => handleFinish('issue')} disabled={!notes.trim()}>Reportar</Button>
+                            <Button variant="outline" className="flex-1" onClick={() => setIncidenceMode(false)}>{t('common.cancel')}</Button>
+                            <Button variant="danger" className="flex-1" onClick={() => handleFinish('issue')} disabled={!notes.trim()}>{t('worker.report')}</Button>
                           </div>
                         </div>
                       )}

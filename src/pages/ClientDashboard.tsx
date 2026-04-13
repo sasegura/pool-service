@@ -5,7 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Card } from '../components/ui/Common';
 import { Waves, Calendar, CheckCircle2, AlertTriangle, Clock, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { es, enUS } from 'date-fns/locale';
+import { useTranslation } from 'react-i18next';
 
 interface Pool {
   id: string;
@@ -26,6 +27,8 @@ interface Log {
 }
 
 export default function ClientDashboard() {
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const { user } = useAuth();
   const [pools, setPools] = useState<Pool[]>([]);
   const [logs, setLogs] = useState<Log[]>([]);
@@ -86,20 +89,20 @@ export default function ClientDashboard() {
     };
   }, [user]);
 
-  if (loading) return <div className="p-8 text-center">Cargando historial...</div>;
+  if (loading) return <div className="p-8 text-center">{t('client.loadingHistory')}</div>;
 
   return (
     <div className="space-y-6">
       <header>
-        <h2 className="text-2xl font-black text-slate-900">Mi Piscina</h2>
-        <p className="text-slate-500">Historial de mantenimiento y limpieza</p>
+        <h2 className="text-2xl font-black text-slate-900">{t('client.title')}</h2>
+        <p className="text-slate-500">{t('client.subtitle')}</p>
       </header>
 
       {pools.length === 0 ? (
         <Card className="p-8 text-center border-dashed border-2">
           <Waves className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-lg font-bold text-slate-900">No hay piscinas vinculadas</h3>
-          <p className="text-slate-500">Contacta con administración para vincular tu propiedad.</p>
+          <h3 className="text-lg font-bold text-slate-900">{t('client.noPoolsTitle')}</h3>
+          <p className="text-slate-500">{t('client.noPoolsBody')}</p>
         </Card>
       ) : (
         <div className="space-y-8">
@@ -118,9 +121,9 @@ export default function ClientDashboard() {
               </div>
 
               <div className="space-y-3">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Revisiones Recientes</h4>
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">{t('client.recentReviews')}</h4>
                 {logs.filter(l => l.poolId === pool.id).length === 0 ? (
-                  <p className="text-sm text-slate-400 italic ml-1">Aún no hay registros de servicio.</p>
+                  <p className="text-sm text-slate-400 italic ml-1">{t('client.noLogs')}</p>
                 ) : (
                   logs.filter(l => l.poolId === pool.id).map(log => (
                     <Card key={log.id} className="p-4 hover:border-blue-200 transition-colors group">
@@ -135,16 +138,16 @@ export default function ClientDashboard() {
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               <span className="font-black text-slate-900">
-                                {log.status === 'ok' ? 'Servicio Completado' : 'Incidencia Reportada'}
+                                {log.status === 'ok' ? t('client.serviceCompleted') : t('client.incidentReported')}
                               </span>
                               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase tracking-tighter">
-                                {workers[log.workerId] || 'Técnico'}
+                                {workers[log.workerId] || t('client.technicianFallback')}
                               </span>
                             </div>
                             <div className="flex items-center text-xs text-slate-500 font-bold gap-3">
                               <div className="flex items-center">
                                 <Calendar className="w-3 h-3 mr-1" />
-                                {log.arrivalTime?.toDate ? format(log.arrivalTime.toDate(), "d MMM, yyyy", { locale: es }) : log.date}
+                                {log.arrivalTime?.toDate ? format(log.arrivalTime.toDate(), "d MMM, yyyy", { locale: dateLocale }) : log.date}
                               </div>
                               <div className="flex items-center">
                                 <Clock className="w-3 h-3 mr-1" />

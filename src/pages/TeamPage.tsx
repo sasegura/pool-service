@@ -5,6 +5,7 @@ import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
 import { Plus, Users, Trash2, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 interface Worker {
   id: string;
@@ -16,6 +17,7 @@ interface Worker {
 import { useAuth } from '../contexts/AuthContext';
 
 export default function TeamPage() {
+  const { t } = useTranslation();
   const { user, loading: authLoading } = useAuth();
   const [allUsers, setAllUsers] = useState<Worker[]>([]);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
@@ -36,11 +38,11 @@ export default function TeamPage() {
     try {
       if (editingUserId) {
         await updateDoc(doc(db, 'users', editingUserId), newWorker);
-        toast.success('Usuario actualizado');
+        toast.success(t('team.toastUpdated'));
       } else {
         const existing = allUsers.find(u => u.email === newWorker.email);
         if (existing) {
-          toast.error('Este correo ya está registrado');
+          toast.error(t('team.toastEmailExists'));
           return;
         }
 
@@ -48,13 +50,13 @@ export default function TeamPage() {
           ...newWorker,
           createdAt: new Date().toISOString(),
         });
-        toast.success('Usuario pre-registrado');
+        toast.success(t('team.toastPreregistered'));
       }
       setNewWorker({ name: '', email: '', role: 'worker' });
       setShowWorkerForm(false);
       setEditingUserId(null);
     } catch (e) {
-      toast.error('Error al guardar usuario');
+      toast.error(t('team.toastSaveError'));
     }
   };
 
@@ -71,78 +73,78 @@ export default function TeamPage() {
     
     try {
       await updateDoc(doc(db, 'users', user.id), { role: nextRole });
-      toast.success(`Rol actualizado a ${nextRole}`);
+      toast.success(t('team.roleUpdated', { role: t(`common.${nextRole}`) }));
     } catch (e) {
-      toast.error('Error al actualizar rol');
+      toast.error(t('team.toastRoleError'));
     }
   };
 
   const deleteUser = async (id: string) => {
-    if (confirm('¿Eliminar este usuario?')) {
+    if (confirm(t('team.confirmDelete'))) {
       await deleteDoc(doc(db, 'users', id));
-      toast.info('Usuario eliminado');
+      toast.info(t('team.toastDeleted'));
     }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-black text-slate-900">Gestión del Equipo</h2>
+        <h2 className="text-2xl font-black text-slate-900">{t('team.title')}</h2>
         <Button size="sm" onClick={() => {
           setShowWorkerForm(true);
           setEditingUserId(null);
           setNewWorker({ name: '', email: '', role: 'worker' });
         }} className="gap-1">
-          <Plus className="w-4 h-4" /> Añadir Usuario
+          <Plus className="w-4 h-4" /> {t('team.addUser')}
         </Button>
       </div>
 
       {showWorkerForm && (
         <Card className="p-4 border-blue-200 bg-blue-50">
           <form onSubmit={handleAddWorker} className="space-y-4">
-            <h3 className="font-bold text-blue-900">{editingUserId ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
+            <h3 className="font-bold text-blue-900">{editingUserId ? t('team.titleEdit') : t('team.titleNew')}</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('common.name')}</label>
                 <input 
                   type="text" 
                   required
                   className="w-full rounded-lg border-slate-200 p-2 text-sm"
                   value={newWorker.name}
                   onChange={e => setNewWorker({...newWorker, name: e.target.value})}
-                  placeholder="Nombre completo"
+                  placeholder={t('team.fullName')}
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email (Google)</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('team.emailGoogle')}</label>
                 <input 
                   type="email" 
                   required
                   className="w-full rounded-lg border-slate-200 p-2 text-sm"
                   value={newWorker.email}
                   onChange={e => setNewWorker({...newWorker, email: e.target.value})}
-                  placeholder="email@gmail.com"
+                  placeholder={t('team.placeholderEmail')}
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Rol</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('common.role')}</label>
                 <select 
                   className="w-full rounded-lg border-slate-200 p-2 text-sm"
                   value={newWorker.role}
                   onChange={e => setNewWorker({...newWorker, role: e.target.value})}
                 >
-                  <option value="worker">Técnico</option>
-                  <option value="admin">Administrador</option>
-                  <option value="client">Cliente</option>
+                  <option value="worker">{t('team.technician')}</option>
+                  <option value="admin">{t('team.administrator')}</option>
+                  <option value="client">{t('team.customer')}</option>
                 </select>
               </div>
             </div>
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1">{editingUserId ? 'Actualizar' : 'Pre-registrar'} Usuario</Button>
+              <Button type="submit" className="flex-1">{editingUserId ? t('team.submitEditUser') : t('team.submitNewUser')}</Button>
               <Button variant="outline" onClick={() => {
                 setShowWorkerForm(false);
                 setEditingUserId(null);
-              }}>Cancelar</Button>
+              }}>{t('common.cancel')}</Button>
             </div>
           </form>
         </Card>
@@ -168,7 +170,7 @@ export default function TeamPage() {
                   user.role === 'admin' ? "bg-purple-50 text-purple-700" : 
                   user.role === 'client' ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
                 )}>
-                  {user.role}
+                  {t(`common.${user.role}`)}
                 </span>
               </div>
             </div>
@@ -178,7 +180,7 @@ export default function TeamPage() {
                 variant="outline" 
                 size="sm" 
                 onClick={() => handleEdit(user)}
-                title="Editar usuario"
+                title={t('team.editUser')}
               >
                 <Edit2 className="w-4 h-4" />
               </Button>
@@ -186,7 +188,7 @@ export default function TeamPage() {
                 variant="outline" 
                 size="sm" 
                 onClick={() => toggleRole(user)}
-                title="Cambiar rol rápido"
+                title={t('team.toggleRole')}
               >
                 <Users className="w-4 h-4" />
               </Button>
