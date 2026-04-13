@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, Timestamp, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
-import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle } from 'lucide-react';
+import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle, Droplets } from 'lucide-react';
 import { format, parseISO, getDay, addDays, startOfDay } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -15,12 +16,8 @@ import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
-interface Pool {
-  id: string;
-  name: string;
-  address: string;
-  coordinates?: { lat: number; lng: number };
-}
+import type { PoolRecord } from '../types/pool';
+import { PoolStatusBadge } from '../components/PoolStatusBadge';
 
 interface Route {
   id: string;
@@ -52,7 +49,7 @@ function WorkerRouteMap({
   completedPoolIds,
 }: {
   poolIds: string[];
-  pools: Record<string, Pool>;
+  pools: Record<string, PoolRecord>;
   completedPoolIds?: string[];
 }) {
   const [markersReady, setMarkersReady] = useState(false);
@@ -112,11 +109,24 @@ function WorkerRouteMap({
 export default function WorkerDashboard() {
   const { user, loading: authLoading } = useAuth();
   const { t, i18n } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const authUid = auth.currentUser?.uid ?? user?.uid;
+  /** Rutas antiguas usan `user.uid` (p. ej. demo-worker-id); las nuevas usan el UID real de Auth. */
+  const routeOwnerIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (authUid) ids.add(authUid);
+    if (user?.uid) ids.add(user.uid);
+    return ids;
+  }, [authUid, user?.uid]);
+
+  const isMyWorkerRoute = (workerId?: string | null) =>
+    Boolean(workerId && routeOwnerIds.has(workerId));
+
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<Route[]>([]);
   const [hasOtherRoutes, setHasOtherRoutes] = useState(false);
-  const [pools, setPools] = useState<Record<string, Pool>>({});
+  const [pools, setPools] = useState<Record<string, PoolRecord>>({});
   const [loading, setLoading] = useState(true);
   const [allMyRoutes, setAllMyRoutes] = useState<Route[]>([]);
   const [showAllRoutes, setShowAllRoutes] = useState(false);
@@ -174,18 +184,17 @@ export default function WorkerDashboard() {
   };
 
   useEffect(() => {
-    if (authLoading || !user?.uid) return;
+    if (authLoading) return;
 
     const today = format(new Date(), 'yyyy-MM-dd');
-    const userUid = user.uid;
     
     // Listen for ALL routes to handle templates, weekly plans and daily instances
     const unsubRoutes = onSnapshot(collection(db, 'routes'), async (snapshot) => {
       const allRoutes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Route));
-      setAllMyRoutes(allRoutes.filter(r => r.workerId === userUid));
+      setAllMyRoutes(allRoutes.filter(r => isMyWorkerRoute(r.workerId)));
       
       // 1. Find a specific daily instance for today (prioridad de planificación si hay varias)
-      const dailyInstances = allRoutes.filter(r => r.workerId === userUid && r.date === today);
+      const dailyInstances = allRoutes.filter(r => isMyWorkerRoute(r.workerId) && r.date === today);
       const dailyInstance = dailyInstances.sort(
         (a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0)
       )[0];
@@ -194,7 +203,7 @@ export default function WorkerDashboard() {
         setTodayRoute(dailyInstance);
       } else {
         // 2. Look for a weekly/scheduled assignment
-        const assignedRoute = allRoutes.find(r => r.workerId === userUid && isRouteActiveToday(r, today));
+        const assignedRoute = allRoutes.find(r => isMyWorkerRoute(r.workerId) && isRouteActiveToday(r, today));
         if (assignedRoute) {
           // Virtual route: needs instantiation
           setTodayRoute({
@@ -213,11 +222,11 @@ export default function WorkerDashboard() {
       const available = allRoutes.filter(r => {
         const isTemplate = !r.date && !r.startDate && !r.assignedDay;
         const isUnassignedToday = r.date === today && !r.workerId;
-        return (isTemplate || isUnassignedToday) && (!r.workerId || r.workerId === userUid);
+        return (isTemplate || isUnassignedToday) && (!r.workerId || isMyWorkerRoute(r.workerId));
       });
       setAvailableRoutes(available);
       
-      setHasOtherRoutes(allRoutes.some(r => r.workerId === userUid && r.date !== today));
+      setHasOtherRoutes(allRoutes.some(r => isMyWorkerRoute(r.workerId) && r.date !== today));
       setLoading(false);
     }, (error) => {
       console.error("Error fetching routes:", error);
@@ -226,9 +235,9 @@ export default function WorkerDashboard() {
 
     // Listen for all pools to have them ready
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
-      const poolMap: Record<string, Pool> = {};
+      const poolMap: Record<string, PoolRecord> = {};
       snap.docs.forEach(d => {
-        poolMap[d.id] = { id: d.id, ...d.data() } as Pool;
+        poolMap[d.id] = { id: d.id, ...d.data() } as PoolRecord;
       });
       setPools(poolMap);
     }, (error) => {
@@ -239,7 +248,7 @@ export default function WorkerDashboard() {
       unsubRoutes();
       unsubPools();
     };
-  }, [user?.uid, authLoading]);
+  }, [authLoading, authUid, user?.uid]);
 
   useEffect(() => {
     if (!user || !todayRoute || todayRoute.status !== 'in-progress') return;
@@ -253,7 +262,8 @@ export default function WorkerDashboard() {
       async (position) => {
         const { latitude, longitude } = position.coords;
         try {
-          await updateDoc(doc(db, 'users', user.uid), {
+          if (!authUid) return;
+          await updateDoc(doc(db, 'users', authUid), {
             lastLocation: { lat: latitude, lng: longitude },
             lastActive: serverTimestamp()
           });
@@ -272,9 +282,34 @@ export default function WorkerDashboard() {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [user, todayRoute?.status]);
+  }, [authUid, user, todayRoute?.status]);
+
+  useEffect(() => {
+    if (!todayRoute) return;
+    const shouldResume = searchParams.get('resumeVisit') === '1';
+    if (!shouldResume) return;
+
+    const resumeRouteId = searchParams.get('routeId');
+    const resumePoolId = searchParams.get('poolId');
+    if (!resumePoolId) return;
+    if (resumeRouteId && resumeRouteId !== todayRoute.id) return;
+
+    const idx = todayRoute.poolIds.findIndex((id) => id === resumePoolId);
+    if (idx === -1) return;
+
+    setActivePoolIndex(idx);
+    setVisitStatus('arrived');
+    setIncidenceMode(false);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('resumeVisit');
+    next.delete('routeId');
+    next.delete('poolId');
+    setSearchParams(next, { replace: true });
+  }, [todayRoute, searchParams, setSearchParams]);
 
   const handlePickRoute = async (routeId: string) => {
+    if (!authUid) return;
     const today = format(new Date(), 'yyyy-MM-dd');
     const sourceRoute = availableRoutes.find(r => r.id === routeId);
     if (!sourceRoute) return;
@@ -283,7 +318,7 @@ export default function WorkerDashboard() {
       // Create a NEW instance for today instead of modifying the template
       const newRouteInstance = {
         ...sourceRoute,
-        workerId: user?.uid,
+        workerId: authUid,
         date: today,
         status: 'pending',
         completedPools: [],
@@ -300,13 +335,14 @@ export default function WorkerDashboard() {
   };
 
   const handleStartDay = async () => {
-    if (!todayRoute) return;
+    if (!todayRoute || !authUid) return;
     
     try {
       if ((todayRoute as any).isVirtual) {
         // Instantiate the weekly/scheduled route for today
         const newInstance = removeUndefinedFields({
           ...todayRoute,
+          workerId: authUid,
           status: 'in-progress',
           startTime: new Date().toISOString(),
           completedPools: [],
@@ -321,7 +357,8 @@ export default function WorkerDashboard() {
       } else {
         await updateDoc(doc(db, 'routes', todayRoute.id), { 
           status: 'in-progress',
-          startTime: todayRoute.startTime || new Date().toISOString()
+          startTime: todayRoute.startTime || new Date().toISOString(),
+          workerId: authUid
         });
         toast.info(todayRoute.status === 'completed' ? t('worker.toastDayResumed') : t('worker.toastDayStarted'));
       }
@@ -332,10 +369,11 @@ export default function WorkerDashboard() {
   };
 
   const handleEndDay = async () => {
-    if (!todayRoute) return;
+    if (!todayRoute || !authUid) return;
     await updateDoc(doc(db, 'routes', todayRoute.id), { 
       status: 'completed',
-      endTime: new Date().toISOString()
+      endTime: new Date().toISOString(),
+      workerId: authUid
     });
     toast.success(t('worker.toastDayFinished'));
   };
@@ -347,13 +385,13 @@ export default function WorkerDashboard() {
   };
 
   const handleFinish = async (status: 'ok' | 'issue') => {
-    if (activePoolIndex === null || !todayRoute) return;
+    if (activePoolIndex === null || !todayRoute || !authUid) return;
     
     const poolId = todayRoute.poolIds[activePoolIndex];
     
     try {
-      await addDoc(collection(db, 'logs'), {
-        workerId: user?.uid,
+      const logPayload = removeUndefinedFields({
+        workerId: authUid,
         poolId,
         arrivalTime: Timestamp.now(), // Simplified for demo
         departureTime: Timestamp.now(),
@@ -362,6 +400,7 @@ export default function WorkerDashboard() {
         notifyClient: status === 'issue' ? notifyClient : true,
         date: todayRoute.date
       });
+      await addDoc(collection(db, 'logs'), logPayload);
 
       // Update route progress
       const currentCompleted = todayRoute.completedPools || [];
@@ -373,7 +412,8 @@ export default function WorkerDashboard() {
           completedPools: newCompleted,
           status: isAllDone ? 'completed' : 'in-progress',
           lastPoolId: poolId,
-          lastStatus: status
+          lastStatus: status,
+          workerId: authUid
         });
       }
 
@@ -388,8 +428,11 @@ export default function WorkerDashboard() {
 
       // Check if all done
       // (In a real app, we'd track progress more granularly)
-    } catch (e) {
-      toast.error(t('worker.toastSaveError'));
+    } catch (e: any) {
+      console.error('Error saving worker log:', e);
+      toast.error(t('worker.toastSaveError'), {
+        description: e?.message || e?.code || 'Unknown error',
+      });
     }
   };
 
@@ -581,11 +624,14 @@ export default function WorkerDashboard() {
             )}>
               <div className="p-5">
                 <div className="flex justify-between items-start mb-4">
-                  <div>
+                  <div className="min-w-0 pr-2">
                     <span className="inline-block bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase mb-1">
                       {t('worker.poolNumber', { n: index + 1 })}
                     </span>
-                    <h3 className="text-lg font-bold text-slate-900">{pool.name}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-bold text-slate-900">{pool.name}</h3>
+                      <PoolStatusBadge status={pool.healthStatus} size="sm" />
+                    </div>
                     <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
                       <MapPin className="w-3.5 h-3.5" />
                       {pool.address}
@@ -633,23 +679,27 @@ export default function WorkerDashboard() {
                       className="space-y-3"
                     >
                       {!incidenceMode ? (
-                        <div className="grid grid-cols-2 gap-3">
-                          <Button 
-                            variant="success" 
-                            className="h-16 flex-col gap-1"
-                            onClick={() => handleFinish('ok')}
-                          >
-                            <CheckCircle2 className="w-6 h-6" />
-                            <span>{t('worker.allOk')}</span>
-                          </Button>
-                          <Button 
-                            variant="danger" 
-                            className="h-16 flex-col gap-1"
-                            onClick={() => setIncidenceMode(true)}
-                          >
-                            <AlertTriangle className="w-6 h-6" />
-                            <span>{t('worker.incident')}</span>
-                          </Button>
+                        <div className="space-y-3">
+                          <Link to={`/pools/${poolId}/visit?routeId=${encodeURIComponent(todayRoute.id)}`} className="block">
+                            <Button type="button" variant="outline" className="w-full min-h-[52px] text-base font-black gap-2">
+                              <Droplets className="w-5 h-5 text-blue-600" />
+                              {t('worker.waterMeasurement')}
+                            </Button>
+                          </Link>
+                          <div className="grid grid-cols-2 gap-3">
+                            <Button
+                              variant="success"
+                              className="h-16 flex-col gap-1"
+                              onClick={() => handleFinish('ok')}
+                            >
+                              <CheckCircle2 className="w-6 h-6" />
+                              <span>{t('worker.allOk')}</span>
+                            </Button>
+                            <Button variant="danger" className="h-16 flex-col gap-1" onClick={() => setIncidenceMode(true)}>
+                              <AlertTriangle className="w-6 h-6" />
+                              <span>{t('worker.incident')}</span>
+                            </Button>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-3 bg-red-50 p-4 rounded-xl border border-red-100">

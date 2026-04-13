@@ -56,20 +56,23 @@ service cloud.firestore {
 
     // Validation Helpers
     function isValidUser(data) {
-      return data.keys().hasAll(['name', 'role', 'uid']) &&
+      return data is map &&
+             data.keys().hasAll(['name', 'role', 'uid']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.role in ['admin', 'worker', 'client'] &&
              data.uid is string;
     }
 
     function isValidPool(data) {
-      return data.keys().hasAll(['name', 'address']) &&
+      return data is map &&
+             data.keys().hasAll(['name', 'address']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.address is string && data.address.size() > 0 && data.address.size() < 200;
     }
 
     function isValidRoute(data) {
-      return data.keys().hasAll(['poolIds', 'status']) &&
+      return data is map &&
+             data.keys().hasAll(['poolIds', 'status']) &&
              data.poolIds is list && data.poolIds.size() > 0 &&
              data.status in ['pending', 'in-progress', 'completed'];
     }
@@ -104,6 +107,12 @@ service cloud.firestore {
       // Allow admins to write, or any authenticated user to seed if the collection is empty
       // (Simplified for demo: allow any authenticated user to create pools for now)
       allow write: if isAuthenticated() && (isAdmin() || !exists(/databases/$(database)/documents/pools/seed-marker));
+
+      match /visits/{visitId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && (isAdmin() || isWorker());
+        allow update, delete: if isAdmin();
+      }
     }
 
     // Routes collection
@@ -112,7 +121,7 @@ service cloud.firestore {
       allow create: if isAuthenticated() && (isAdmin() || !exists(/databases/$(database)/documents/routes/seed-marker));
       allow update: if isAuthenticated() && (
         isAdmin() || 
-        (isWorker() && request.resource.data.workerId == request.auth.uid)
+        request.resource.data.workerId == request.auth.uid
       );
       allow delete: if isAdmin();
     }
@@ -122,11 +131,16 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isAdmin() || 
         isWorker() || 
+        resource.data.workerId == request.auth.uid ||
         (isClient() && 
          get(/databases/$(database)/documents/pools/$(resource.data.poolId)).data.clientId == request.auth.uid &&
          (resource.data.status == 'ok' || resource.data.get('notifyClient', true) == true))
       );
-      allow create: if isAuthenticated() && (isAdmin() || isWorker());
+      allow create: if isAuthenticated() && (
+        isAdmin() ||
+        isWorker() ||
+        request.resource.data.workerId == request.auth.uid
+      );
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }

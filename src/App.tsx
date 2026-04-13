@@ -7,17 +7,27 @@ import Login from './pages/Login';
 import WorkerDashboard from './pages/WorkerDashboard';
 import AdminOverview from './pages/AdminOverview';
 import PoolsPage from './pages/PoolsPage';
+import PoolDetailPage from './pages/PoolDetailPage';
+import PoolVisitPage from './pages/PoolVisitPage';
 import RoutesPage from './pages/RoutesPage';
 import TeamPage from './pages/TeamPage';
 import IncidentsPage from './pages/IncidentsPage';
 import ClientDashboard from './pages/ClientDashboard';
 import Layout from './components/Layout';
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'admin' | 'worker' | 'client' }> = ({ children, requiredRole }) => {
+const ProtectedRoute: React.FC<{
+  children: React.ReactNode;
+  requiredRole?: 'admin' | 'worker' | 'client';
+  allowedRoles?: ('admin' | 'worker' | 'client')[];
+}> = ({ children, requiredRole, allowedRoles }) => {
   const { role, loading } = useAuth();
   const { t } = useTranslation();
 
   if (loading) return <div className="flex items-center justify-center h-screen">{t('app.loading')}</div>;
+  if (allowedRoles?.length) {
+    if (!role || !allowedRoles.includes(role)) return <Navigate to="/" />;
+    return <>{children}</>;
+  }
   if (requiredRole && role !== requiredRole) return <Navigate to="/" />;
 
   return <>{children}</>;
@@ -40,13 +50,29 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<DashboardSwitcher />} />
-            <Route 
-              path="pools" 
+            <Route
+              path="pools"
               element={
                 <ProtectedRoute requiredRole="admin">
                   <PoolsPage />
                 </ProtectedRoute>
-              } 
+              }
+            />
+            <Route
+              path="pools/:poolId"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <PoolDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="pools/:poolId/visit"
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'worker']}>
+                  <PoolVisitPage />
+                </ProtectedRoute>
+              }
             />
             <Route 
               path="routes" 

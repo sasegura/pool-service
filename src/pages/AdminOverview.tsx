@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import type { PoolHealthStatus } from '../types/pool';
+import { PoolStatusBadge } from '../components/PoolStatusBadge';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -37,11 +39,6 @@ interface User {
   role: string;
   lastLocation?: { lat: number; lng: number };
   lastActive?: any;
-}
-
-interface Pool {
-  id: string;
-  name: string;
 }
 
 function AdminOverviewTrackingMap({ workers }: { workers: User[] }) {
@@ -79,6 +76,7 @@ export default function AdminOverview() {
   const [users, setUsers] = useState<Record<string, string>>({});
   const [allWorkers, setAllWorkers] = useState<User[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
+  const [criticalPools, setCriticalPools] = useState<{ id: string; name: string; healthStatus: PoolHealthStatus }[]>([]);
   const [liveWorkers, setLiveWorkers] = useState<User[]>([]);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ workerId: '', date: '' });
@@ -89,7 +87,17 @@ export default function AdminOverview() {
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
       setPoolsCount(snap.size);
       const pMap: Record<string, string> = {};
-      snap.docs.forEach(d => pMap[d.id] = d.data().name);
+      const crit: { id: string; name: string; healthStatus: PoolHealthStatus }[] = [];
+      snap.docs.forEach((d) => {
+        const data = d.data() as { name?: string; healthStatus?: PoolHealthStatus };
+        pMap[d.id] = data.name || '';
+        const h = data.healthStatus;
+        if (h === 'urgent' || h === 'review') {
+          crit.push({ id: d.id, name: data.name || d.id, healthStatus: h });
+        }
+      });
+      crit.sort((a, b) => (a.healthStatus === 'urgent' ? 0 : 1) - (b.healthStatus === 'urgent' ? 0 : 1));
+      setCriticalPools(crit.slice(0, 10));
       setPools(pMap);
     });
     const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
@@ -217,6 +225,31 @@ export default function AdminOverview() {
           </div>
         </Card>
       </div>
+
+      {criticalPools.length > 0 && (
+        <Card className="p-4 border-amber-200 bg-amber-50/60">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-black text-amber-950 uppercase tracking-wide">{t('admin.criticalPoolsTitle')}</h3>
+            <button type="button" className="text-xs font-bold text-amber-800 underline" onClick={() => navigate('/pools')}>
+              {t('admin.criticalPoolsCta')}
+            </button>
+          </div>
+          <ul className="space-y-2">
+            {criticalPools.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/pools/${p.id}`)}
+                  className="w-full flex items-center justify-between gap-3 rounded-xl bg-white/80 border border-amber-100 px-3 py-2 text-left hover:bg-white transition"
+                >
+                  <span className="font-bold text-slate-900 truncate">{p.name}</span>
+                  <PoolStatusBadge status={p.healthStatus} size="sm" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">

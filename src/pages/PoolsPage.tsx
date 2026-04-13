@@ -1,20 +1,28 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { collection, onSnapshot, addDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
 import { Button, Card } from '../components/ui/Common';
-import { Plus, Waves, MapPin, Trash2, AlertCircle, Edit2, Search, CheckCircle } from 'lucide-react';
+import { Plus, Waves, MapPin, Trash2, AlertCircle, Edit2, Search, CheckCircle, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
+import type { PoolRecord, PoolShape, PoolSystemType, PoolUsage } from '../types/pool';
+import { computeAvgDepthM, estimateVolumeM3 } from '../lib/poolVolume';
+import { PoolStatusBadge } from '../components/PoolStatusBadge';
 
 const GOOGLE_MAPS_API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
-// Helper component to handle geocoding within the APIProvider
-function Geocoder({ address, onResult, setApiError }: { 
-  address: string, 
-  onResult: (coords: { lat: number, lng: number }) => void,
-  setApiError: (error: string | null) => void
+function Geocoder({
+  address,
+  onResult,
+  setApiError,
+}: {
+  address: string;
+  onResult: (coords: { lat: number; lng: number }) => void;
+  setApiError: (error: string | null) => void;
 }) {
   const { t } = useTranslation();
   const geocodingLib = useMapsLibrary('geocoding');
@@ -41,7 +49,7 @@ function Geocoder({ address, onResult, setApiError }: {
     } catch (e: any) {
       console.error('Geocoding error:', e);
       const isApiError = e.message?.includes('not activated') || e.code === 'REQUEST_DENIED';
-      
+
       if (isApiError) {
         setApiError(t('pools.geocodeApiError'));
         toast.error(t('pools.geocodeApiToastTitle'), {
@@ -58,14 +66,7 @@ function Geocoder({ address, onResult, setApiError }: {
 
   return (
     <div className="flex flex-col gap-2">
-      <Button 
-        type="button" 
-        variant="outline" 
-        size="sm" 
-        onClick={handleGeocode}
-        disabled={loading || !address}
-        className="gap-2"
-      >
+      <Button type="button" variant="outline" size="sm" onClick={handleGeocode} disabled={loading || !address} className="gap-2">
         {loading ? t('pools.validating') : <><Search className="w-4 h-4" /> {t('pools.validateAddress')}</>}
       </Button>
       {!geocodingLib && (
@@ -77,47 +78,203 @@ function Geocoder({ address, onResult, setApiError }: {
   );
 }
 
-interface Pool {
-  id: string;
-  name: string;
-  address: string;
-  clientId?: string;
-  coordinates?: { lat: number; lng: number };
-}
-
 interface Client {
   id: string;
   name: string;
   role: string;
 }
 
-import { useAuth } from '../contexts/AuthContext';
+type PoolDraft = {
+  name: string;
+  address: string;
+  clientId: string;
+  coordinates: { lat: number; lng: number };
+  ownerLabel: string;
+  poolSystemType: PoolSystemType;
+  usage: PoolUsage;
+  shape: PoolShape;
+  lengthM: string;
+  widthM: string;
+  minDepthM: string;
+  maxDepthM: string;
+  volumeM3: string;
+  volumeManualOverride: boolean;
+  filterType: string;
+  pumpType: string;
+  chlorinationSystem: string;
+  skimmerType: string;
+  lastTechnicalReview: string;
+  lastMaintenance: string;
+  lastFilterClean: string;
+  previousIncidents: string;
+};
+
+const DEFAULT_FILTER_TYPE = 'sand';
+const DEFAULT_PUMP_TYPE = 'single_speed';
+const DEFAULT_CHLORINATION_SYSTEM = 'manual_chlorine';
+const DEFAULT_SKIMMER_TYPE = 'surface';
+
+function initialDraft(): PoolDraft {
+  return {
+    name: '',
+    address: '',
+    clientId: '',
+    coordinates: MIAMI_CENTER,
+    ownerLabel: '',
+    poolSystemType: 'chlorine',
+    usage: 'private',
+    shape: 'rectangular',
+    lengthM: '',
+    widthM: '',
+    minDepthM: '',
+    maxDepthM: '',
+    volumeM3: '',
+    volumeManualOverride: false,
+    filterType: DEFAULT_FILTER_TYPE,
+    pumpType: DEFAULT_PUMP_TYPE,
+    chlorinationSystem: DEFAULT_CHLORINATION_SYSTEM,
+    skimmerType: DEFAULT_SKIMMER_TYPE,
+    lastTechnicalReview: '',
+    lastMaintenance: '',
+    lastFilterClean: '',
+    previousIncidents: '',
+  };
+}
+
+function parsePositiveNumber(raw: string): number | undefined {
+  const v = raw.trim().replace(',', '.');
+  if (v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+function cleanOptionalFields<T extends Record<string, unknown>>(obj: T): Partial<T> | undefined {
+  const entries = Object.entries(obj).filter(([, value]) => value !== undefined);
+  return entries.length ? (Object.fromEntries(entries) as Partial<T>) : undefined;
+}
+
+function deepRemoveUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => deepRemoveUndefined(item));
+  }
+  if (value && typeof value === 'object') {
+    const cleanedEntries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, deepRemoveUndefined(v)] as const);
+    return Object.fromEntries(cleanedEntries);
+  }
+  return value;
+}
 
 export default function PoolsPage() {
   const { t } = useTranslation();
   const { user, loading: authLoading } = useAuth();
-  const [pools, setPools] = useState<Pool[]>([]);
+  const [pools, setPools] = useState<PoolRecord[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [showPoolForm, setShowPoolForm] = useState(false);
   const [editingPoolId, setEditingPoolId] = useState<string | null>(null);
-  const [newPool, setNewPool] = useState({ name: '', address: '', clientId: '', coordinates: MIAMI_CENTER });
+  const [draft, setDraft] = useState<PoolDraft>(() => initialDraft());
   const [isAddressValidated, setIsAddressValidated] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [showPickerMap, setShowPickerMap] = useState(false);
+
+  useEffect(() => {
+    if (!showPoolForm) {
+      setShowPickerMap(false);
+      return;
+    }
+
+    // Delay mount one frame so the container exists before maps internals observe it.
+    const raf = window.requestAnimationFrame(() => setShowPickerMap(true));
+    return () => window.cancelAnimationFrame(raf);
+  }, [showPoolForm]);
 
   useEffect(() => {
     if (authLoading || !user) return;
 
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
-      setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as Pool)));
+      setPools(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PoolRecord)));
     });
     const unsubClients = onSnapshot(collection(db, 'users'), (snap) => {
-      setClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as Client)).filter(c => c.role === 'client' || (c as any).isClient));
+      setClients(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() } as Client)).filter((c) => c.role === 'client' || (c as any).isClient)
+      );
     });
     return () => {
       unsubPools();
       unsubClients();
     };
-  }, []);
+  }, [authLoading, user?.uid]);
+
+  const computedPreview = useMemo(() => {
+    const L = parsePositiveNumber(draft.lengthM);
+    const W = parsePositiveNumber(draft.widthM);
+    const minD = parsePositiveNumber(draft.minDepthM);
+    const maxD = parsePositiveNumber(draft.maxDepthM);
+    const avg = computeAvgDepthM(minD, maxD);
+    const est =
+      !draft.volumeManualOverride &&
+      estimateVolumeM3({ shape: draft.shape, lengthM: L, widthM: W, avgDepthM: avg });
+    return { avg, est };
+  }, [draft.lengthM, draft.widthM, draft.minDepthM, draft.maxDepthM, draft.shape, draft.volumeManualOverride]);
+
+  useEffect(() => {
+    if (draft.volumeManualOverride) return;
+    if (computedPreview.est != null && Number.isFinite(computedPreview.est)) {
+      const rounded = Math.round(computedPreview.est * 10) / 10;
+      setDraft((d) => ({ ...d, volumeM3: String(rounded) }));
+    }
+  }, [computedPreview.est, draft.volumeManualOverride]);
+
+  const buildFirestorePayload = (): Record<string, unknown> => {
+    const L = parsePositiveNumber(draft.lengthM);
+    const W = parsePositiveNumber(draft.widthM);
+    const minD = parsePositiveNumber(draft.minDepthM);
+    const maxD = parsePositiveNumber(draft.maxDepthM);
+    const avg = computeAvgDepthM(minD, maxD);
+    const manualVol = parsePositiveNumber(draft.volumeM3);
+    const est =
+      estimateVolumeM3({ shape: draft.shape, lengthM: L, widthM: W, avgDepthM: avg }) ??
+      manualVol;
+
+    const volumeM3 = draft.volumeManualOverride ? manualVol ?? est : est ?? manualVol;
+
+    const equipment = cleanOptionalFields({
+      filterType: draft.filterType.trim() || undefined,
+      pumpType: draft.pumpType.trim() || undefined,
+      chlorinationSystem: draft.chlorinationSystem.trim() || undefined,
+      skimmerType: draft.skimmerType.trim() || undefined,
+      lastTechnicalReview: draft.lastTechnicalReview.trim() || undefined,
+    });
+    const history = cleanOptionalFields({
+      lastMaintenance: draft.lastMaintenance.trim() || undefined,
+      lastFilterClean: draft.lastFilterClean.trim() || undefined,
+      previousIncidents: draft.previousIncidents.trim() || undefined,
+    });
+
+    const rawPayload = {
+      name: draft.name.trim(),
+      address: draft.address.trim(),
+      clientId: draft.clientId || undefined,
+      coordinates: draft.coordinates,
+      ownerLabel: draft.ownerLabel.trim() || undefined,
+      poolSystemType: draft.poolSystemType,
+      usage: draft.usage,
+      shape: draft.shape,
+      lengthM: L,
+      widthM: W,
+      minDepthM: minD,
+      maxDepthM: maxD,
+      avgDepthM: avg,
+      volumeM3: volumeM3,
+      volumeManualOverride: draft.volumeManualOverride,
+      equipment,
+      history,
+    };
+
+    return deepRemoveUndefined(rawPayload) as Record<string, unknown>;
+  };
 
   const handleAddPool = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,12 +284,7 @@ export default function PoolsPage() {
       }
     }
     try {
-      const poolData = {
-        name: newPool.name,
-        address: newPool.address,
-        clientId: newPool.clientId,
-        coordinates: newPool.coordinates
-      };
+      const poolData = buildFirestorePayload();
 
       if (editingPoolId) {
         await updateDoc(doc(db, 'pools', editingPoolId), poolData);
@@ -141,29 +293,50 @@ export default function PoolsPage() {
         await addDoc(collection(db, 'pools'), poolData);
         toast.success(t('pools.toastAdded'));
       }
-      setNewPool({ name: '', address: '', clientId: '', coordinates: MIAMI_CENTER });
+      setDraft(initialDraft());
       setShowPoolForm(false);
       setEditingPoolId(null);
       setIsAddressValidated(false);
-    } catch (e) {
-      toast.error(t('pools.toastSaveError'));
+    } catch (e: any) {
+      console.error('Error saving pool:', e);
+      toast.error(t('pools.toastSaveError'), {
+        description: e?.message || e?.code || 'Unknown error',
+      });
     }
   };
 
-  const handleEdit = (pool: Pool) => {
-    setNewPool({ 
-      name: pool.name, 
-      address: pool.address, 
-      clientId: pool.clientId || '', 
-      coordinates: pool.coordinates || MIAMI_CENTER 
+  const handleEdit = (pool: PoolRecord) => {
+    setDraft({
+      name: pool.name,
+      address: pool.address,
+      clientId: pool.clientId || '',
+      coordinates: pool.coordinates || MIAMI_CENTER,
+      ownerLabel: pool.ownerLabel || '',
+      poolSystemType: pool.poolSystemType || 'chlorine',
+      usage: pool.usage || 'private',
+      shape: pool.shape || 'rectangular',
+      lengthM: pool.lengthM != null ? String(pool.lengthM) : '',
+      widthM: pool.widthM != null ? String(pool.widthM) : '',
+      minDepthM: pool.minDepthM != null ? String(pool.minDepthM) : '',
+      maxDepthM: pool.maxDepthM != null ? String(pool.maxDepthM) : '',
+      volumeM3: pool.volumeM3 != null ? String(pool.volumeM3) : '',
+      volumeManualOverride: !!pool.volumeManualOverride,
+      filterType: pool.equipment?.filterType || DEFAULT_FILTER_TYPE,
+      pumpType: pool.equipment?.pumpType || DEFAULT_PUMP_TYPE,
+      chlorinationSystem: pool.equipment?.chlorinationSystem || DEFAULT_CHLORINATION_SYSTEM,
+      skimmerType: pool.equipment?.skimmerType || DEFAULT_SKIMMER_TYPE,
+      lastTechnicalReview: pool.equipment?.lastTechnicalReview || '',
+      lastMaintenance: pool.history?.lastMaintenance || '',
+      lastFilterClean: pool.history?.lastFilterClean || '',
+      previousIncidents: pool.history?.previousIncidents || '',
     });
     setEditingPoolId(pool.id);
     setShowPoolForm(true);
-    setIsAddressValidated(true); // Assume existing are validated or allow edit
+    setIsAddressValidated(true);
   };
 
   const deletePool = async (id: string) => {
-      if (confirm(t('pools.confirmDelete'))) {
+    if (confirm(t('pools.confirmDelete'))) {
       await deleteDoc(doc(db, 'pools', id));
       toast.info(t('pools.toastDeleted'));
     }
@@ -176,9 +349,7 @@ export default function PoolsPage() {
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
         <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
         <h2 className="text-xl font-bold text-amber-900 mb-2">{t('pools.missingApiTitle')}</h2>
-        <p className="text-sm text-amber-700">
-          {t('pools.missingApiBody')}
-        </p>
+        <p className="text-sm text-amber-700">{t('pools.missingApiBody')}</p>
       </div>
     );
   }
@@ -188,12 +359,16 @@ export default function PoolsPage() {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <h2 className="text-2xl font-black text-slate-900">{t('pools.title')}</h2>
-          <Button size="sm" onClick={() => {
-            setShowPoolForm(true);
-            setEditingPoolId(null);
-            setNewPool({ name: '', address: '', clientId: '', coordinates: MIAMI_CENTER });
-            setIsAddressValidated(false);
-          }} className="gap-1">
+          <Button
+            size="sm"
+            onClick={() => {
+              setShowPoolForm(true);
+              setEditingPoolId(null);
+              setDraft(initialDraft());
+              setIsAddressValidated(false);
+            }}
+            className="gap-1"
+          >
             <Plus className="w-4 h-4" /> {t('pools.newPool')}
           </Button>
         </div>
@@ -206,35 +381,71 @@ export default function PoolsPage() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('pools.clientPropertyName')}</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       required
                       className="w-full rounded-lg border-slate-200 p-2 text-sm"
-                      value={newPool.name}
-                      onChange={e => setNewPool({...newPool, name: e.target.value})}
+                      value={draft.name}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                       placeholder={t('pools.placeholderProperty')}
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.ownerLabel')}</label>
+                    <input
+                      type="text"
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                      value={draft.ownerLabel}
+                      onChange={(e) => setDraft({ ...draft, ownerLabel: e.target.value })}
+                      placeholder={t('poolForm.ownerLabelPh')}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.systemType')}</label>
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.poolSystemType}
+                        onChange={(e) => setDraft({ ...draft, poolSystemType: e.target.value as PoolSystemType })}
+                      >
+                        <option value="chlorine">{t('poolForm.system.chlorine')}</option>
+                        <option value="salt">{t('poolForm.system.salt')}</option>
+                        <option value="natural">{t('poolForm.system.natural')}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.usage')}</label>
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.usage}
+                        onChange={(e) => setDraft({ ...draft, usage: e.target.value as PoolUsage })}
+                      >
+                        <option value="private">{t('poolForm.usageOpt.private')}</option>
+                        <option value="community">{t('poolForm.usageOpt.community')}</option>
+                        <option value="public">{t('poolForm.usageOpt.public')}</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('pools.fullAddress')}</label>
                     <div className="flex gap-2">
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         required
                         className="flex-1 rounded-lg border-slate-200 p-2 text-sm"
-                        value={newPool.address}
-                        onChange={e => {
-                          setNewPool({...newPool, address: e.target.value});
+                        value={draft.address}
+                        onChange={(e) => {
+                          setDraft({ ...draft, address: e.target.value });
                           setIsAddressValidated(false);
                         }}
                         placeholder={t('pools.placeholderAddress')}
                       />
-                      <Geocoder 
-                        address={newPool.address} 
+                      <Geocoder
+                        address={draft.address}
                         onResult={(coords) => {
-                          setNewPool(prev => ({ ...prev, coordinates: coords }));
+                          setDraft((prev) => ({ ...prev, coordinates: coords }));
                           setIsAddressValidated(true);
-                        }} 
+                        }}
                         setApiError={setApiError}
                       />
                     </div>
@@ -252,7 +463,16 @@ export default function PoolsPage() {
                         <div className="space-y-1">
                           <p className="font-bold">{t('pools.configErrorHowTo')}</p>
                           <ol className="list-decimal list-inside space-y-0.5 opacity-80">
-                            <li><a href="https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com" target="_blank" className="underline font-bold">{t('pools.configErrorStep1')}</a></li>
+                            <li>
+                              <a
+                                href="https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline font-bold"
+                              >
+                                {t('pools.configErrorStep1')}
+                              </a>
+                            </li>
                             <li>{t('pools.configErrorStep2')}</li>
                             <li>{t('pools.configErrorStep3')}</li>
                           </ol>
@@ -260,7 +480,7 @@ export default function PoolsPage() {
                         <p className="mt-2 font-bold text-blue-700">{t('pools.configErrorManual')}</p>
                       </div>
                     )}
-                    {!isAddressValidated && !apiError && newPool.address && (
+                    {!isAddressValidated && !apiError && draft.address && (
                       <div className="mt-2 p-2 bg-slate-100 rounded border border-slate-200 text-[10px] text-slate-600">
                         <p className="font-bold flex items-center gap-1 mb-1">
                           <AlertCircle className="w-3 h-3 text-amber-500" /> {t('pools.validationHelpTitle')}
@@ -274,79 +494,247 @@ export default function PoolsPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('pools.ownerClient')}</label>
-                    <select 
+                    <select
                       className="w-full rounded-lg border-slate-200 p-2 text-sm"
-                      value={newPool.clientId}
-                      onChange={e => setNewPool({...newPool, clientId: e.target.value})}
+                      value={draft.clientId}
+                      onChange={(e) => setDraft({ ...draft, clientId: e.target.value })}
                     >
                       <option value="">{t('pools.noOwner')}</option>
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
+
+                  <div className="border-t border-blue-100 pt-3 space-y-3">
+                    <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">{t('poolForm.sectionDims')}</p>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.shape._')}</label>
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.shape}
+                        onChange={(e) => setDraft({ ...draft, shape: e.target.value as PoolShape })}
+                      >
+                        <option value="rectangular">{t('poolForm.shape.rectangular')}</option>
+                        <option value="oval">{t('poolForm.shape.oval')}</option>
+                        <option value="round">{t('poolForm.shape.round')}</option>
+                        <option value="irregular">{t('poolForm.shape.irregular')}</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.length')}</label>
+                        <input
+                          className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                          value={draft.lengthM}
+                          onChange={(e) => setDraft({ ...draft, lengthM: e.target.value })}
+                          placeholder="m"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.width')}</label>
+                        <input
+                          className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                          value={draft.widthM}
+                          onChange={(e) => setDraft({ ...draft, widthM: e.target.value })}
+                          placeholder="m"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.depthMin')}</label>
+                        <input
+                          className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                          value={draft.minDepthM}
+                          onChange={(e) => setDraft({ ...draft, minDepthM: e.target.value })}
+                          placeholder="m"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.depthMax')}</label>
+                        <input
+                          className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                          value={draft.maxDepthM}
+                          onChange={(e) => setDraft({ ...draft, maxDepthM: e.target.value })}
+                          placeholder="m"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-600">
+                      {t('poolForm.avgDepth')}: <span className="font-black">{computedPreview.avg != null ? `${computedPreview.avg.toFixed(2)} m` : '—'}</span>
+                    </p>
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={draft.volumeManualOverride}
+                        onChange={(e) => setDraft({ ...draft, volumeManualOverride: e.target.checked })}
+                      />
+                      {t('poolForm.manualVolume')}
+                    </label>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{t('poolForm.volume')}</label>
+                      <input
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.volumeM3}
+                        onChange={(e) => setDraft({ ...draft, volumeM3: e.target.value })}
+                        placeholder="m³"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-blue-100 pt-3 space-y-3">
+                    <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">{t('poolForm.sectionEquip')}</p>
+                    <div className="grid grid-cols-1 gap-2">
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.filterType}
+                        onChange={(e) => setDraft({ ...draft, filterType: e.target.value })}
+                      >
+                        <option value="sand">{t('poolForm.filterTypeOpt.sand')}</option>
+                        <option value="glass">{t('poolForm.filterTypeOpt.glass')}</option>
+                        <option value="cartridge">{t('poolForm.filterTypeOpt.cartridge')}</option>
+                        <option value="diatomaceous_earth">{t('poolForm.filterTypeOpt.diatomaceous_earth')}</option>
+                        <option value="other">{t('poolForm.filterTypeOpt.other')}</option>
+                      </select>
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.pumpType}
+                        onChange={(e) => setDraft({ ...draft, pumpType: e.target.value })}
+                      >
+                        <option value="single_speed">{t('poolForm.pumpTypeOpt.single_speed')}</option>
+                        <option value="dual_speed">{t('poolForm.pumpTypeOpt.dual_speed')}</option>
+                        <option value="variable_speed">{t('poolForm.pumpTypeOpt.variable_speed')}</option>
+                        <option value="other">{t('poolForm.pumpTypeOpt.other')}</option>
+                      </select>
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.chlorinationSystem}
+                        onChange={(e) => setDraft({ ...draft, chlorinationSystem: e.target.value })}
+                      >
+                        <option value="manual_chlorine">{t('poolForm.chlorinationOpt.manual_chlorine')}</option>
+                        <option value="salt_chlorinator">{t('poolForm.chlorinationOpt.salt_chlorinator')}</option>
+                        <option value="tablet_dispenser">{t('poolForm.chlorinationOpt.tablet_dispenser')}</option>
+                        <option value="uv_ozone">{t('poolForm.chlorinationOpt.uv_ozone')}</option>
+                        <option value="other">{t('poolForm.chlorinationOpt.other')}</option>
+                      </select>
+                      <select
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        value={draft.skimmerType}
+                        onChange={(e) => setDraft({ ...draft, skimmerType: e.target.value })}
+                      >
+                        <option value="surface">{t('poolForm.skimmersOpt.surface')}</option>
+                        <option value="overflow">{t('poolForm.skimmersOpt.overflow')}</option>
+                        <option value="channel">{t('poolForm.skimmersOpt.channel')}</option>
+                        <option value="other">{t('poolForm.skimmersOpt.other')}</option>
+                      </select>
+                      <input
+                        className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                        placeholder={t('poolForm.lastReview')}
+                        value={draft.lastTechnicalReview}
+                        onChange={(e) => setDraft({ ...draft, lastTechnicalReview: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-blue-100 pt-3 space-y-3">
+                    <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">{t('poolForm.sectionHistory')}</p>
+                    <input
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                      placeholder={t('poolForm.lastMaintenance')}
+                      value={draft.lastMaintenance}
+                      onChange={(e) => setDraft({ ...draft, lastMaintenance: e.target.value })}
+                    />
+                    <input
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm"
+                      placeholder={t('poolForm.lastFilterClean')}
+                      value={draft.lastFilterClean}
+                      onChange={(e) => setDraft({ ...draft, lastFilterClean: e.target.value })}
+                    />
+                    <textarea
+                      className="w-full rounded-lg border-slate-200 p-2 text-sm min-h-[72px]"
+                      placeholder={t('poolForm.incidents')}
+                      value={draft.previousIncidents}
+                      onChange={(e) => setDraft({ ...draft, previousIncidents: e.target.value })}
+                    />
+                  </div>
                 </div>
-                <div className="h-48 rounded-xl overflow-hidden border border-slate-200 relative">
-                  <Map
-                    defaultCenter={newPool.coordinates}
-                    center={newPool.coordinates}
-                    defaultZoom={15}
-                    mapId="pool_picker_map"
-                    onClick={(e) => {
-                      if (e.detail.latLng) {
-                        setNewPool(prev => ({ ...prev, coordinates: e.detail.latLng! }));
-                        setIsAddressValidated(true);
-                      }
-                    }}
-                  >
-                    <AdvancedMarker position={newPool.coordinates}>
-                      <Pin background={'#2563eb'} glyphColor={'#fff'} borderColor={'#000'} />
-                    </AdvancedMarker>
-                  </Map>
+                <div className="h-48 md:h-full min-h-[12rem] rounded-xl overflow-hidden border border-slate-200 relative">
+                  {showPickerMap ? (
+                    <Map
+                      defaultCenter={draft.coordinates}
+                      center={draft.coordinates}
+                      defaultZoom={15}
+                      mapId="pool_picker_map"
+                      onClick={(e) => {
+                        if (e.detail.latLng) {
+                          setDraft((prev) => ({ ...prev, coordinates: e.detail.latLng! }));
+                          setIsAddressValidated(true);
+                        }
+                      }}
+                    >
+                      <AdvancedMarker position={draft.coordinates}>
+                        <Pin background={'#2563eb'} glyphColor={'#fff'} borderColor={'#000'} />
+                      </AdvancedMarker>
+                    </Map>
+                  ) : (
+                    <div className="h-full w-full bg-slate-100 animate-pulse" aria-hidden />
+                  )}
                   <div className="absolute top-2 left-2 bg-white/90 backdrop-blur px-2 py-1 rounded text-[10px] font-bold shadow-sm">
                     {isAddressValidated ? t('pools.mapConfirmed') : t('pools.mapClickAdjust')}
                   </div>
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button type="submit" className="flex-1">{editingPoolId ? t('pools.updatePool') : t('pools.savePool')}</Button>
-                <Button variant="outline" onClick={() => {
-                  setShowPoolForm(false);
-                  setEditingPoolId(null);
-                }}>{t('common.cancel')}</Button>
+                <Button type="submit" className="flex-1">
+                  {editingPoolId ? t('pools.updatePool') : t('pools.savePool')}
+                </Button>
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => {
+                    setShowPoolForm(false);
+                    setEditingPoolId(null);
+                  }}
+                >
+                  {t('common.cancel')}
+                </Button>
               </div>
             </form>
           </Card>
         )}
 
         <div className="grid gap-3">
-          {pools.map(pool => (
-            <Card key={pool.id} className="p-4 flex justify-between items-center hover:border-blue-200 transition-colors">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-50 p-2 rounded-lg text-blue-600">
+          {pools.map((pool) => (
+            <Card key={pool.id} className="p-4 flex justify-between items-center hover:border-blue-200 transition-colors gap-3">
+              <Link to={`/pools/${pool.id}`} className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="bg-blue-50 p-2 rounded-lg text-blue-600 shrink-0">
                   <Waves className="w-5 h-5" />
                 </div>
-                <div>
-                  <h4 className="font-bold text-slate-900">{pool.name}</h4>
-                  <p className="text-xs text-slate-500 flex items-center gap-1">
-                    <MapPin className="w-3 h-3" /> {pool.address}
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-bold text-slate-900">{pool.name}</h4>
+                    <PoolStatusBadge status={pool.healthStatus} size="sm" />
+                  </div>
+                  <p className="text-xs text-slate-500 flex items-center gap-1 truncate">
+                    <MapPin className="w-3 h-3 shrink-0" /> {pool.address}
                   </p>
                   {pool.clientId && (
-                    <p className="text-[10px] text-blue-600 font-bold mt-1 uppercase">
-                      {t('pools.propLabel')} {clients.find(c => c.id === pool.clientId)?.name || t('pools.loadingName')}
+                    <p className="text-[10px] text-blue-600 font-bold mt-1 uppercase truncate">
+                      {t('pools.propLabel')} {clients.find((c) => c.id === pool.clientId)?.name || t('pools.loadingName')}
                     </p>
                   )}
+                  {pool.volumeM3 != null && pool.volumeM3 > 0 && (
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">{pool.volumeM3.toFixed(1)} m³</p>
+                  )}
                 </div>
-              </div>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => handleEdit(pool)} 
-                  className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
-                >
+                <ChevronRight className="w-5 h-5 text-slate-300 shrink-0" />
+              </Link>
+              <div className="flex gap-2 shrink-0">
+                <button type="button" onClick={() => handleEdit(pool)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
                   <Edit2 className="w-4 h-4" />
                 </button>
-                <button 
-                  onClick={() => deletePool(pool.id)} 
-                  className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-                >
+                <button type="button" onClick={() => deletePool(pool.id)} className="p-2 text-slate-400 hover:text-red-600 transition-colors">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
