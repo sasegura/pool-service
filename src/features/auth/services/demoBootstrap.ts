@@ -71,13 +71,10 @@ export async function runDemoBootstrap(params: {
         for (const pool of demoPools) {
           await addDoc(collection(db, 'pools'), pool);
         }
-      } else {
-        const myPools = poolsSnap.docs.filter((d) => d.data().clientId === authUser.uid);
-        if (myPools.length === 0 && poolsSnap.docs.length > 0) {
-          const firstPoolId = poolsSnap.docs[0].id;
-          await setDoc(doc(db, 'pools', firstPoolId), { clientId: authUser.uid }, { merge: true });
-        }
       }
+      // Intentionally do NOT reassign pool.clientId on load: that used to set the first pool's
+      // owner to authUser.uid whenever the user had no pools tagged with their uid, which
+      // overwrote legitimate owner changes after every refresh.
     } catch (e) {
       handleFirestoreError(e, FirestoreOperationType.LIST, 'pools', 'logOnly');
     }

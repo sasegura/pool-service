@@ -36,13 +36,15 @@ export default function PoolDetailPage() {
         setLoading(false);
         return;
       }
-      setPool({ id: snap.id, ...snap.data() } as PoolRecord);
+      setPool({ ...(snap.data() as Omit<PoolRecord, 'id'>), id: snap.id } as PoolRecord);
       setLoading(false);
     });
     const q = query(collection(db, 'pools', poolId, 'visits'), orderBy('visitedAt', 'desc'), limit(24));
     const unsubVisits = onSnapshot(q, (snap) => {
       setVisits(
-        snap.docs.map((d) => ({ id: d.id, ...(d.data() as object) } as PoolVisitRecord))
+        snap.docs.map(
+          (d) => ({ ...(d.data() as Omit<PoolVisitRecord, 'id'>), id: d.id }) as PoolVisitRecord
+        )
       );
     });
     return () => {

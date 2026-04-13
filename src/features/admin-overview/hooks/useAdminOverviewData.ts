@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
-import type { PoolHealthStatus } from '../../../types/pool';
-
 export interface AdminOverviewRoute {
   id: string;
   workerId: string;
@@ -37,9 +35,6 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean) {
   const [users, setUsers] = useState<Record<string, string>>({});
   const [allWorkers, setAllWorkers] = useState<AdminOverviewWorkerUser[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
-  const [criticalPools, setCriticalPools] = useState<
-    { id: string; name: string; healthStatus: PoolHealthStatus }[]
-  >([]);
   const [liveWorkers, setLiveWorkers] = useState<AdminOverviewWorkerUser[]>([]);
 
   useEffect(() => {
@@ -48,17 +43,10 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean) {
     const unsubPools = onSnapshot(collection(db, 'pools'), (snap) => {
       setPoolsCount(snap.size);
       const pMap: Record<string, string> = {};
-      const crit: { id: string; name: string; healthStatus: PoolHealthStatus }[] = [];
       snap.docs.forEach((d) => {
-        const data = d.data() as { name?: string; healthStatus?: PoolHealthStatus };
+        const data = d.data() as { name?: string };
         pMap[d.id] = data.name || '';
-        const h = data.healthStatus;
-        if (h === 'urgent' || h === 'review') {
-          crit.push({ id: d.id, name: data.name || d.id, healthStatus: h });
-        }
       });
-      crit.sort((a, b) => (a.healthStatus === 'urgent' ? 0 : 1) - (b.healthStatus === 'urgent' ? 0 : 1));
-      setCriticalPools(crit.slice(0, 10));
       setPools(pMap);
     });
 
@@ -107,7 +95,6 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean) {
     users,
     allWorkers,
     pools,
-    criticalPools,
     liveWorkers,
   };
 }

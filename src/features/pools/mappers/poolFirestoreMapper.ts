@@ -1,8 +1,20 @@
+import { deleteField } from 'firebase/firestore';
 import { computeAvgDepthM, estimateVolumeM3 } from '../../../lib/poolVolume';
 import type { PoolDraft } from '../domain/poolDraft';
 import { cleanOptionalFields, deepRemoveUndefined, parsePositiveNumber } from '../domain/poolDraft';
 
-export function buildPoolFirestorePayload(draft: PoolDraft): Record<string, unknown> {
+export type BuildPoolFirestorePayloadOptions = {
+  /**
+   * When updating an existing document, an empty owner must remove `clientId` in Firestore.
+   * Omitting the key would leave the previous owner in place (merge update).
+   */
+  forUpdate?: boolean;
+};
+
+export function buildPoolFirestorePayload(
+  draft: PoolDraft,
+  options?: BuildPoolFirestorePayloadOptions
+): Record<string, unknown> {
   const L = parsePositiveNumber(draft.lengthM);
   const W = parsePositiveNumber(draft.widthM);
   const minD = parsePositiveNumber(draft.minDepthM);
@@ -30,7 +42,7 @@ export function buildPoolFirestorePayload(draft: PoolDraft): Record<string, unkn
   const rawPayload = {
     name: draft.name.trim(),
     address: draft.address.trim(),
-    clientId: draft.clientId || undefined,
+    clientId: draft.clientId.trim() ? draft.clientId.trim() : undefined,
     coordinates: draft.coordinates,
     ownerLabel: draft.ownerLabel.trim() || undefined,
     poolSystemType: draft.poolSystemType,
@@ -47,5 +59,9 @@ export function buildPoolFirestorePayload(draft: PoolDraft): Record<string, unkn
     history,
   };
 
-  return deepRemoveUndefined(rawPayload) as Record<string, unknown>;
+  const result = deepRemoveUndefined(rawPayload) as Record<string, unknown>;
+  if (options?.forUpdate && !draft.clientId.trim()) {
+    result.clientId = deleteField();
+  }
+  return result;
 }

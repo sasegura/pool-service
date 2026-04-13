@@ -10,8 +10,6 @@ import { toast } from 'sonner';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import type { PoolHealthStatus } from '../types/pool';
-import { PoolStatusBadge } from '../components/PoolStatusBadge';
 import { getGoogleMapsApiKey } from '../config/env';
 import {
   useAdminOverviewData,
@@ -57,7 +55,6 @@ export default function AdminOverview() {
     users,
     allWorkers,
     pools,
-    criticalPools,
     liveWorkers,
   } = useAdminOverviewData(selectedDate, !loading && !!user);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
@@ -154,31 +151,6 @@ export default function AdminOverview() {
           </div>
         </Card>
       </div>
-
-      {criticalPools.length > 0 && (
-        <Card className="p-4 border-amber-200 bg-amber-50/60">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h3 className="text-sm font-black text-amber-950 uppercase tracking-wide">{t('admin.criticalPoolsTitle')}</h3>
-            <button type="button" className="text-xs font-bold text-amber-800 underline" onClick={() => navigate('/pools')}>
-              {t('admin.criticalPoolsCta')}
-            </button>
-          </div>
-          <ul className="space-y-2">
-            {criticalPools.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/pools/${p.id}`)}
-                  className="w-full flex items-center justify-between gap-3 rounded-xl bg-white/80 border border-amber-100 px-3 py-2 text-left hover:bg-white transition"
-                >
-                  <span className="font-bold text-slate-900 truncate">{p.name}</span>
-                  <PoolStatusBadge status={p.healthStatus} size="sm" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">

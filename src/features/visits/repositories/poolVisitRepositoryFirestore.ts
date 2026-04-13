@@ -5,7 +5,7 @@ import type { PoolRecord } from '../../../types/pool';
 export async function fetchPoolById(poolId: string): Promise<PoolRecord | null> {
   const snap = await getDoc(doc(db, 'pools', poolId));
   if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() } as PoolRecord;
+  return { ...(snap.data() as Omit<PoolRecord, 'id'>), id: snap.id } as PoolRecord;
 }
 
 export async function fetchRecentVisitDocs(poolId: string, maxDocs: number): Promise<Record<string, unknown>[]> {

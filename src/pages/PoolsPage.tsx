@@ -11,7 +11,11 @@ import { computeAvgDepthM, estimateVolumeM3 } from '../lib/poolVolume';
 import { PoolStatusBadge } from '../components/PoolStatusBadge';
 import { getGoogleMapsApiKey } from '../config/env';
 import { initialPoolDraft, parsePositiveNumber, type PoolDraft } from '../features/pools/domain/poolDraft';
-import { resolveClientName } from '../features/pools/domain/poolClients';
+import {
+  isPoolClientInDirectory,
+  resolveClientDirectoryDocId,
+  resolveClientName,
+} from '../features/pools/domain/poolClients';
 import { buildPoolFirestorePayload } from '../features/pools/mappers/poolFirestoreMapper';
 import { poolRecordToDraft } from '../features/pools/mappers/poolRecordToDraft';
 import { usePoolsDirectory } from '../features/pools/hooks/usePoolsDirectory';
@@ -81,7 +85,7 @@ export default function PoolsPage() {
       }
     }
     try {
-      const poolData = buildPoolFirestorePayload(draft);
+      const poolData = buildPoolFirestorePayload(draft, { forUpdate: !!editingPoolId });
 
       if (editingPoolId) {
         await repository.updatePool(editingPoolId, poolData);
@@ -104,7 +108,8 @@ export default function PoolsPage() {
   };
 
   const handleEdit = (pool: PoolRecord) => {
-    setDraft(poolRecordToDraft(pool));
+    const clientId = resolveClientDirectoryDocId(clients, pool.clientId);
+    setDraft(poolRecordToDraft({ ...pool, clientId }));
     setEditingPoolId(pool.id);
     setShowPoolForm(true);
     setIsAddressValidated(true);
@@ -201,14 +206,14 @@ export default function PoolsPage() {
                 </label>
                 <select
                   className="w-full rounded-lg border-slate-200 p-2 text-sm bg-white"
-                  value={pool.clientId || ''}
+                  value={resolveClientDirectoryDocId(clients, pool.clientId)}
                   onChange={(e) => {
                     const v = e.target.value;
                     void handleQuickOwnerChange(pool.id, v);
                   }}
                 >
                   <option value="">{t('pools.noOwner')}</option>
-                  {pool.clientId && !clients.some((c) => c.id === pool.clientId) ? (
+                  {pool.clientId && !isPoolClientInDirectory(clients, pool.clientId) ? (
                     <option value={pool.clientId}>
                       {resolveClientName(clients, pool.clientId) || `${pool.clientId.slice(0, 8)}…`}
                     </option>

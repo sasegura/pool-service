@@ -16,7 +16,15 @@ export const poolsDirectoryRepositoryFirestore: PoolsDirectoryRepository = {
     return onSnapshot(
       collection(db, 'pools'),
       (snap) => {
-        onNext(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PoolRecord)));
+        onNext(
+          snap.docs.map(
+            (d) =>
+              ({
+                ...(d.data() as Omit<PoolRecord, 'id'>),
+                id: d.id,
+              }) as PoolRecord
+          )
+        );
       },
       onError
     );
@@ -28,7 +36,13 @@ export const poolsDirectoryRepositoryFirestore: PoolsDirectoryRepository = {
       (snap) => {
         onNext(
           snap.docs
-            .map((d) => ({ id: d.id, ...d.data() } as ClientDirectoryEntry))
+            .map(
+              (d) =>
+                ({
+                  ...(d.data() as Omit<ClientDirectoryEntry, 'id'>),
+                  id: d.id,
+                }) as ClientDirectoryEntry
+            )
             .filter((c) => c.role === 'client')
         );
       },

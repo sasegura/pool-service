@@ -81,7 +81,9 @@ export function useClientDashboard(userUid: string | undefined, userEmail: strin
         unsubLogs?.();
         unsubLogs = undefined;
 
-        const poolsData = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ClientDashboardPool));
+        const poolsData = snap.docs.map(
+          (d) => ({ ...(d.data() as Omit<ClientDashboardPool, 'id'>), id: d.id }) as ClientDashboardPool
+        );
         setPools(poolsData);
 
         if (poolsData.length > 0) {
@@ -94,7 +96,10 @@ export function useClientDashboard(userUid: string | undefined, userEmail: strin
 
           unsubLogs = onSnapshot(qLogs, (logSnap) => {
             const logsData = logSnap.docs
-              .map((d) => ({ id: d.id, ...d.data() } as ClientDashboardLog))
+              .map(
+                (d) =>
+                  ({ ...(d.data() as Omit<ClientDashboardLog, 'id'>), id: d.id }) as ClientDashboardLog
+              )
               .filter((log) => log.notifyClient !== false);
 
             const sortedLogs = logsData.sort((a, b) => {

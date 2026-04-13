@@ -5,13 +5,19 @@ import { toast } from 'sonner';
 import { AlertCircle, Search } from 'lucide-react';
 import { Button } from '../../../components/ui/Common';
 
+export type GeocodeSuccessPayload = {
+  coords: { lat: number; lng: number };
+  formattedAddress?: string;
+  viewport?: google.maps.LatLngBoundsLiteral;
+};
+
 export function Geocoder({
   address,
   onResult,
   setApiError,
 }: {
   address: string;
-  onResult: (coords: { lat: number; lng: number }) => void;
+  onResult: (payload: GeocodeSuccessPayload) => void;
   setApiError: (error: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -28,13 +34,45 @@ export function Geocoder({
     if (!geocoder || !address) return;
     setLoading(true);
     try {
-      const response = await geocoder.geocode({ address });
-      if (response.results && response.results[0]) {
-        const location = response.results[0].geometry.location;
-        onResult({ lat: location.lat(), lng: location.lng() });
+      const { results, status } = await new Promise<{
+        results: google.maps.GeocoderResult[] | null;
+        status: google.maps.GeocoderStatus;
+      }>((resolve) => {
+        geocoder.geocode({ address }, (res, st) => resolve({ results: res, status: st }));
+      });
+
+      if (status === 'OK' && results?.[0]) {
+        const r = results[0];
+        const location = r.geometry.location;
+        const vp = r.geometry.viewport;
+        const viewport = vp
+          ? {
+              north: vp.getNorthEast().lat(),
+              east: vp.getNorthEast().lng(),
+              south: vp.getSouthWest().lat(),
+              west: vp.getSouthWest().lng(),
+            }
+          : undefined;
+        onResult({
+          coords: { lat: location.lat(), lng: location.lng() },
+          formattedAddress: r.formatted_address,
+          viewport,
+        });
+        setApiError(null);
         toast.success(t('pools.geocodeSuccess'));
-      } else {
+      } else if (status === 'ZERO_RESULTS') {
         toast.error(t('pools.geocodeNotFound'));
+      } else {
+        const isApiError = status === 'REQUEST_DENIED' || status === 'OVER_QUERY_LIMIT';
+        if (isApiError) {
+          setApiError(t('pools.geocodeApiError'));
+          toast.error(t('pools.geocodeApiToastTitle'), {
+            description: t('pools.geocodeApiToastDescription'),
+            duration: 8000,
+          });
+        } else {
+          toast.error(t('pools.geocodeGenericError'));
+        }
       }
     } catch (e: unknown) {
       console.error('Geocoding error:', e);
