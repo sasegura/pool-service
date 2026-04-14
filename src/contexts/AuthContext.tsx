@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
+  doc,
   getDocsFromServer,
   limit,
   onSnapshot,
@@ -12,10 +13,31 @@ import { auth, db } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
 import type { AppUser } from '../features/auth/types';
 import { runDemoBootstrap } from '../features/auth/services/demoBootstrap';
-import { bootstrapAnonymousSandbox, createTenantWorkspace } from '../features/tenant/services/tenantClientSetup';
+import { isDemoAccountEmail } from '../config/demoAccount';
+import { bootstrapEmailDemoWorkspace, createTenantWorkspace } from '../features/tenant/services/tenantClientSetup';
 import type { CompanyMembershipRole } from '../features/tenant/types';
 
+const DEMO_DASHBOARD_VIEW_KEY = 'pool-service-demo-dashboard-view';
+
+export type DemoDashboardView = 'admin' | 'worker' | 'client';
+
 export type MembershipRole = CompanyMembershipRole | null;
+
+function readStoredDemoView(): DemoDashboardView {
+  try {
+    const v = sessionStorage.getItem(DEMO_DASHBOARD_VIEW_KEY);
+    if (v === 'worker' || v === 'client' || v === 'admin') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'admin';
+}
+
+export function demoDashboardViewToNavRole(view: DemoDashboardView): CompanyMembershipRole {
+  if (view === 'worker') return 'technician';
+  if (view === 'client') return 'client';
+  return 'admin';
+}
 
 function parseMembershipRole(raw: string | null | undefined): MembershipRole {
   if (raw === 'admin' || raw === 'supervisor' || raw === 'technician' || raw === 'client') return raw;
@@ -45,6 +67,13 @@ interface AuthContextType {
   isClient: boolean;
   /** Legacy UI role for copy that still keys off admin | worker | client */
   role: 'admin' | 'worker' | 'client' | null;
+  /** True when the active company is the preset demo workspace (`isAnonymousSandbox` or `isDemoWorkspace`). */
+  isDemoCompany: boolean;
+  /** In demo company: which dashboard to show (Firestore role stays admin). */
+  demoDashboardView: DemoDashboardView;
+  setDemoDashboardView: (view: DemoDashboardView) => void;
+  /** Maps demo view to a membership-like role for nav and labels when `isDemoCompany`. */
+  navRoleForUi: MembershipRole;
   setRole: (_: 'admin' | 'worker' | 'client') => void;
 }
 
@@ -64,6 +93,10 @@ const AuthContext = createContext<AuthContextType>({
   isWorker: false,
   isClient: false,
   role: null,
+  isDemoCompany: false,
+  demoDashboardView: 'admin',
+  setDemoDashboardView: () => {},
+  navRoleForUi: null,
   setRole: () => {},
 });
 
@@ -76,7 +109,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [membershipRole, setMembershipRole] = useState<MembershipRole>(null);
   const [needsCompanyOnboarding, setNeedsCompanyOnboarding] = useState(false);
   const [tenantError, setTenantError] = useState<string | null>(null);
-  const anonBootstrapLock = useRef(false);
+  const [isDemoCompany, setIsDemoCompany] = useState(false);
+  const [demoDashboardView, setDemoDashboardViewState] = useState<DemoDashboardView>('admin');
+  const demoWorkspaceBootstrapLock = useRef(false);
+
+  const setDemoDashboardView = useCallback((view: DemoDashboardView) => {
+    setDemoDashboardViewState(view);
+    try {
+      sessionStorage.setItem(DEMO_DASHBOARD_VIEW_KEY, view);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!companyId) {
+      setIsDemoCompany(false);
+      return;
+    }
+    const ref = doc(db, 'companies', companyId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.data();
+        const v = data?.isAnonymousSandbox === true || data?.isDemoWorkspace === true;
+        setIsDemoCompany(v);
+      },
+      () => setIsDemoCompany(false)
+    );
+    return () => unsub();
+  }, [companyId]);
+
+  useEffect(() => {
+    if (isDemoCompany) {
+      setDemoDashboardViewState(readStoredDemoView());
+    } else {
+      setDemoDashboardViewState('admin');
+    }
+  }, [isDemoCompany]);
 
   const membershipQuery = useMemo(() => {
     if (!authUser) return null;
@@ -104,12 +174,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       setCompanyId(null);
       setMembershipRole(null);
-      setNeedsCompanyOnboarding(!u.isAnonymous);
+      setNeedsCompanyOnboarding(!u.isAnonymous && !isDemoAccountEmail(u.email));
     }
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setTenantError(null);
       if (user) {
         setAuthUser(user);
@@ -117,17 +187,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         setAuthUser(null);
         setAuthLoading(false);
-        try {
-          await signInAnonymously(auth);
-        } catch (error: unknown) {
-          if (error && typeof error === 'object' && 'code' in error && error.code === 'auth/admin-restricted-operation') {
-            console.warn(
-              'Firebase Anonymous Auth is disabled. Enable Anonymous in Firebase Console → Authentication.'
-            );
-          } else {
-            console.error('Error signing in anonymously:', error);
-          }
-        }
       }
     });
     return () => unsubscribe();
@@ -156,19 +215,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        if (authUser.isAnonymous) {
-          if (anonBootstrapLock.current) return;
-          anonBootstrapLock.current = true;
+        if (isDemoAccountEmail(authUser.email)) {
+          if (demoWorkspaceBootstrapLock.current) return;
+          demoWorkspaceBootstrapLock.current = true;
           setTenantLoading(true);
           void (async () => {
             try {
-              await bootstrapAnonymousSandbox(db, authUser.uid);
+              await bootstrapEmailDemoWorkspace(db, authUser.uid, {
+                displayName: authUser.displayName || authUser.email?.split('@')[0] || 'Demo',
+                email: authUser.email || '',
+              });
             } catch (e) {
               console.error(e);
               setTenantError(e instanceof Error ? e.message : 'tenant_error');
               setTenantLoading(false);
             } finally {
-              anonBootstrapLock.current = false;
+              demoWorkspaceBootstrapLock.current = false;
             }
           })();
           return;
@@ -184,7 +246,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTenantError(e instanceof Error ? e.message : 'tenant_error');
         setCompanyId(null);
         setMembershipRole(null);
-        setNeedsCompanyOnboarding(!authUser.isAnonymous);
+        setNeedsCompanyOnboarding(!authUser.isAnonymous && !isDemoAccountEmail(authUser.email));
         setTenantLoading(false);
       }
     );
@@ -217,8 +279,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (!membershipRole || !authUser || !user || !companyId) return;
-    void runDemoBootstrap({ db, companyId, authUser, membershipRole, user, t });
-  }, [membershipRole, authUser, user, companyId, t]);
+    void runDemoBootstrap({
+      db,
+      companyId,
+      authUser,
+      user,
+      t,
+      seedSamplePoolsAndRoutes: isDemoCompany,
+    });
+  }, [membershipRole, authUser, user, companyId, t, isDemoCompany]);
 
   const isAdmin = membershipRole === 'admin';
   const isSupervisor = membershipRole === 'supervisor';
@@ -233,6 +302,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [membershipRole]);
 
   const loading = authLoading || (!!authUser && tenantLoading);
+
+  const navRoleForUi: MembershipRole = useMemo(
+    () => (isDemoCompany ? demoDashboardViewToNavRole(demoDashboardView) : membershipRole),
+    [isDemoCompany, demoDashboardView, membershipRole]
+  );
 
   const setRole = useCallback(() => {}, []);
 
@@ -254,6 +328,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isWorker,
         isClient,
         role,
+        isDemoCompany,
+        demoDashboardView,
+        setDemoDashboardView,
+        navRoleForUi,
         setRole,
       }}
     >

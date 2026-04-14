@@ -78,19 +78,42 @@ const resources = {
         seedRouteName: 'Test route (tomorrow)',
         seedWorkerName: 'Test technician',
         seedClientName: 'Test client',
+        sandboxBadge: 'Demo workspace',
+        dashboardPreviewHint: 'Switch views — your Firestore role stays admin; routes stay unlocked for exploration.',
       },
       login: {
         title: 'Miami Pool Care',
         subtitle: 'Professional pool maintenance and cleaning management.',
         signInGoogle: 'Sign in with Google',
+        signInEmail: 'Sign in with email',
+        email: 'Email',
+        password: 'Password',
+        or: 'or',
+        useDemoEmail: 'Use demo account {{email}}',
+        demoSetupHint:
+          'Demo workspace: create user {{email}} with Email/Password in Firebase Console (Authentication), set a password, then sign in here. Same email with Google also works.',
+        emailPasswordRequired: 'Enter email and password.',
         footer:
           'Only authorized staff can access the system. If you do not have access, contact administration.',
         toastSuccess: 'Signed in successfully',
-        toastError: 'Could not sign in with Google',
+        toastError: 'Could not sign in',
+        googleErrorPopupBlocked:
+          'The browser blocked the Google window. Trying sign-in again in this tab… If it still fails, allow pop-ups for this site.',
+        googleErrorPopupClosed: 'Sign-in was cancelled. Try again.',
+        googleErrorUnauthorizedDomain:
+          'This domain is not allowed for Google sign-in. In Firebase Console → Authentication → Settings → Authorized domains, add localhost (and your production host).',
+        googleErrorOperationNotAllowed:
+          'Google sign-in is disabled. Enable the Google provider in Firebase Console → Authentication → Sign-in method.',
+        googleErrorNetwork: 'Network error. Check your connection and try again.',
+        googleErrorAccountExists: 'This email is already registered with another method. Sign in with email/password or link accounts in Firebase.',
+        googleErrorInternal: 'Google sign-in failed (internal). Often fixed by: enabling Google provider, correct Authorized domains, or using sign-in without an embedded iframe.',
+        googleErrorGeneric: 'Google sign-in failed ({{code}}).',
       },
       layout: {
         brandName: 'Miami Pool Care',
-        footerDemo: '© 2026 Miami Pool Care. Demo mode (no authentication)',
+        footerDemo: '© 2026 Miami Pool Care',
+        footerDemoSandbox:
+          '© 2026 Miami Pool Care · Sandbox with sample data — sign in with Google for your own workspace.',
       },
       app: {
         loading: 'Loading...',
@@ -319,11 +342,13 @@ const resources = {
         preregisterUser: 'Pre-register',
         userButton: 'user',
         submitEditUser: 'Update user',
-        submitNewUser: 'Pre-register user',
+        submitNewUser: 'Add user',
         toggleRole: 'Cycle role',
         toastUpdated: 'User updated',
         toastEmailExists: 'This email is already registered',
         toastPreregistered: 'User pre-registered',
+        toastTechnicianRegistered: 'Technician added to Firebase Auth and the team.',
+        toastTechnicianPasswordOnce: 'One-time password (copy now; it will not be shown again): {{password}}',
         toastSaveError: 'Could not save user',
         roleUpdated: 'Role updated to {{role}}',
         toastRoleError: 'Could not update role',
@@ -629,19 +654,45 @@ const resources = {
         seedRouteName: 'Ruta de prueba (mañana)',
         seedWorkerName: 'Técnico de pruebas',
         seedClientName: 'Cliente de pruebas',
+        sandboxBadge: 'Espacio demo',
+        dashboardPreviewHint:
+          'Cambia de vista — en Firestore sigues siendo admin; las rutas siguen desbloqueadas para explorar.',
       },
       login: {
         title: 'Miami Pool Care',
         subtitle: 'Gestión profesional de mantenimiento y limpieza de piscinas.',
         signInGoogle: 'Entrar con Google',
+        signInEmail: 'Entrar con correo',
+        email: 'Correo',
+        password: 'Contraseña',
+        or: 'o',
+        useDemoEmail: 'Usar cuenta demo {{email}}',
+        demoSetupHint:
+          'Espacio demo: crea el usuario {{email}} con correo/contraseña en Firebase Console (Authentication), define una contraseña e inicia sesión aquí. El mismo correo con Google también vale.',
+        emailPasswordRequired: 'Introduce correo y contraseña.',
         footer:
           'Solo personal autorizado puede acceder al sistema. Si no tienes acceso, contacta con administración.',
         toastSuccess: 'Sesión iniciada correctamente',
-        toastError: 'Error al iniciar sesión con Google',
+        toastError: 'No se pudo iniciar sesión',
+        googleErrorPopupBlocked:
+          'El navegador bloqueó la ventana de Google. Reintentando el inicio en esta pestaña… Si sigue fallando, permite ventanas emergentes para este sitio.',
+        googleErrorPopupClosed: 'Se canceló el inicio de sesión. Inténtalo de nuevo.',
+        googleErrorUnauthorizedDomain:
+          'Este dominio no está autorizado para Google. En Firebase Console → Authentication → Settings → Authorized domains, añade localhost (y tu dominio de producción).',
+        googleErrorOperationNotAllowed:
+          'El inicio con Google está desactivado. Activa el proveedor Google en Firebase Console → Authentication → Método de acceso.',
+        googleErrorNetwork: 'Error de red. Comprueba la conexión e inténtalo de nuevo.',
+        googleErrorAccountExists:
+          'Este correo ya está registrado con otro método. Entra con correo/contraseña o vincula cuentas en Firebase.',
+        googleErrorInternal:
+          'Fallo interno de Google. Suele resolverse activando el proveedor Google, dominios autorizados correctos o evitando la app dentro de un iframe embebido.',
+        googleErrorGeneric: 'Error al iniciar sesión con Google ({{code}}).',
       },
       layout: {
         brandName: 'Miami Pool Care',
-        footerDemo: '© 2026 Miami Pool Care. Modo demo (sin autenticación)',
+        footerDemo: '© 2026 Miami Pool Care',
+        footerDemoSandbox:
+          '© 2026 Miami Pool Care · Sandbox con datos de ejemplo — entra con Google para tu propio espacio.',
       },
       app: {
         loading: 'Cargando...',
@@ -872,11 +923,13 @@ const resources = {
         preregisterUser: 'Pre-registrar',
         userButton: 'usuario',
         submitEditUser: 'Actualizar usuario',
-        submitNewUser: 'Pre-registrar usuario',
+        submitNewUser: 'Añadir usuario',
         toggleRole: 'Cambiar rol rápido',
         toastUpdated: 'Usuario actualizado',
         toastEmailExists: 'Este correo ya está registrado',
         toastPreregistered: 'Usuario pre-registrado',
+        toastTechnicianRegistered: 'Técnico creado en Firebase Auth y en el equipo.',
+        toastTechnicianPasswordOnce: 'Contraseña temporal (cópiala ahora; no se volverá a mostrar): {{password}}',
         toastSaveError: 'Error al guardar usuario',
         roleUpdated: 'Rol actualizado a {{role}}',
         toastRoleError: 'Error al actualizar rol',

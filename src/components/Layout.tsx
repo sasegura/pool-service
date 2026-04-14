@@ -25,7 +25,7 @@ function roleLabelKey(membershipRole: string | null): string {
 }
 
 export default function Layout() {
-  const { user, membershipRole } = useAuth();
+  const { user, membershipRole, isDemoCompany, demoDashboardView, setDemoDashboardView, navRoleForUi } = useAuth();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
 
@@ -36,7 +36,7 @@ export default function Layout() {
 
   const handleLogout = async () => {
     await signOut(auth);
-    navigate('/');
+    navigate('/login');
   };
 
   if (!user) return <Outlet />;
@@ -49,9 +49,7 @@ export default function Layout() {
     { to: '/incidents', label: t('nav.incidents'), icon: AlertCircle, roles: ['admin', 'supervisor'] },
   ];
 
-  const filteredNav = navItems.filter((item) => membershipRole && item.roles.includes(membershipRole));
-
-  const showDemoRoleSwitcher = import.meta.env.VITE_SHOW_DEMO_ROLE_SWITCHER === 'true';
+  const filteredNav = navItems.filter((item) => navRoleForUi && item.roles.includes(navRoleForUi));
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -75,8 +73,13 @@ export default function Layout() {
             <div className="flex flex-col items-end">
               <span className="text-sm font-bold text-slate-900">{user.displayName}</span>
               <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">
-                {membershipRole ? t(`common.${roleLabelKey(membershipRole)}`) : '—'}
+                {navRoleForUi ? t(`common.${roleLabelKey(navRoleForUi)}`) : '—'}
               </span>
+              {isDemoCompany ? (
+                <span className="text-[9px] font-bold text-amber-600 uppercase tracking-wide mt-0.5">
+                  {t('demo.sandboxBadge')}
+                </span>
+              ) : null}
             </div>
             <button
               type="button"
@@ -115,24 +118,36 @@ export default function Layout() {
       </main>
 
       <footer className="bg-white border-t border-slate-200 p-6 flex flex-col items-center gap-4">
-        {showDemoRoleSwitcher ? (
-          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            {(['admin', 'worker', 'client'] as const).map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => navigate('/')}
-                className={cn(
-                  'px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all',
-                  'text-slate-400 hover:text-slate-600'
-                )}
-              >
-                {t(`common.${r}`)}
-              </button>
-            ))}
+        {isDemoCompany ? (
+          <div className="w-full max-w-md flex flex-col items-center gap-2">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">
+              {t('demo.dashboardPreviewHint')}
+            </p>
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full justify-center">
+              {(['admin', 'worker', 'client'] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => {
+                    setDemoDashboardView(r);
+                    navigate('/');
+                  }}
+                  className={cn(
+                    'flex-1 px-2 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all',
+                    demoDashboardView === r
+                      ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
+                      : 'text-slate-400 hover:text-slate-600'
+                  )}
+                >
+                  {t(`common.${r}`)}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
-        <p className="text-xs text-slate-400 font-medium">{t('layout.footerDemo')}</p>
+        <p className="text-xs text-slate-400 font-medium">
+          {isDemoCompany ? t('layout.footerDemoSandbox') : t('layout.footerDemo')}
+        </p>
       </footer>
     </div>
   );

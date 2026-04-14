@@ -36,13 +36,21 @@ export default function TeamPage() {
           return;
         }
 
-        const memberDocId = await repository.createPreregisteredUser({
+        const created = await repository.createPreregisteredUser({
           name: newWorker.name.trim(),
           email,
           role: newWorker.role,
         });
-        const link = `${window.location.origin}/accept-invite?companyId=${encodeURIComponent(companyId)}&inviteId=${encodeURIComponent(memberDocId)}`;
-        toast.success(t('team.toastPreregistered'), { description: link });
+        if (newWorker.role === 'worker') {
+          const pwd = created.temporaryPassword;
+          toast.success(t('team.toastTechnicianRegistered'), {
+            description: pwd ? t('team.toastTechnicianPasswordOnce', { password: pwd }) : undefined,
+            duration: pwd ? 30_000 : 5_000,
+          });
+        } else {
+          const link = `${window.location.origin}/accept-invite?companyId=${encodeURIComponent(companyId)}&inviteId=${encodeURIComponent(created.id)}`;
+          toast.success(t('team.toastPreregistered'), { description: link });
+        }
       }
       setNewWorker({ name: '', email: '', role: 'worker' });
       setShowWorkerForm(false);

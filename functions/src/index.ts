@@ -7,6 +7,9 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 });
 
+/** Gen2 runs on Cloud Run: public invoker so browsers can call (OPTIONS + POST); handlers still enforce Firebase Auth. */
+const callableWithCors = { cors: true as const, invoker: 'public' as const };
+
 const app = getApps().length ? getApps()[0]! : initializeApp();
 
 const FIRESTORE_DATABASE_ID =
@@ -56,10 +59,16 @@ async function assertAdmin(uid: string, companyId: string): Promise<void> {
   }
 }
 
+async function assertAdminOrSupervisor(uid: string, companyId: string): Promise<CompanyRole> {
+  const role = await assertActiveMembership(uid, companyId);
+  if (role !== 'admin' && role !== 'supervisor') {
+    throw new HttpsError('permission-denied', 'Admin or supervisor required');
+  }
+  return role;
+}
+
 /** Creates a company and makes the caller the initial admin. */
-export const createCompany = onCall(
-  { cors: true },
-  async (request) => {
+export const createCompany = onCall(callableWithCors, async (request) => {
     try {
       if (!request.auth?.uid) {
         throw new HttpsError('unauthenticated', 'Sign in required');
@@ -155,7 +164,7 @@ export const createCompany = onCall(
 );
 
 /** Anonymous users get a personal sandbox company (demo continuity). */
-export const bootstrapAnonymousTenant = onCall({ cors: true }, async (request) => {
+export const bootstrapAnonymousTenant = onCall(callableWithCors, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Sign in required');
   }
@@ -211,7 +220,101 @@ export const bootstrapAnonymousTenant = onCall({ cors: true }, async (request) =
   return { companyId, reused: false };
 });
 
-export const inviteCompanyUser = onCall({ cors: true }, async (request) => {
+/**
+ * Creates a Firebase Auth user for an existing active technician member row (no uid yet),
+ * writes `users/{uid}` + membership, and sets `uid` on the member document.
+ */
+export const provisionTechnicianAuthUser = onCall(callableWithCors, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required');
+  }
+  const caller = request.auth.uid;
+  const body = request.data as Record<string, unknown>;
+  const companyId = typeof body.companyId === 'string' ? body.companyId : '';
+  const memberDocId = typeof body.memberDocId === 'string' ? body.memberDocId : '';
+  if (!companyId || !memberDocId) {
+    throw new HttpsError('invalid-argument', 'companyId and memberDocId are required');
+  }
+
+  await assertAdminOrSupervisor(caller, companyId);
+
+  const memRef = db.doc(`companies/${companyId}/members/${memberDocId}`);
+  const memSnap = await memRef.get();
+  if (!memSnap.exists) {
+    throw new HttpsError('not-found', 'Member not found');
+  }
+  const m = memSnap.data() as {
+    email?: string;
+    name?: string;
+    role?: string;
+    status?: string;
+    uid?: string;
+  };
+  if (m.role !== 'technician') {
+    throw new HttpsError('failed-precondition', 'Only technician members can be provisioned here');
+  }
+  if (m.status !== 'active') {
+    throw new HttpsError('failed-precondition', 'Member must be active');
+  }
+  const existingUid = typeof m.uid === 'string' ? m.uid.trim() : '';
+  if (existingUid.length > 0) {
+    throw new HttpsError('failed-precondition', 'Member already linked to Firebase Auth');
+  }
+  const email = normalizeEmail(String(m.email ?? ''));
+  if (!email.includes('@')) {
+    throw new HttpsError('invalid-argument', 'Member must have a valid email');
+  }
+  const displayName = String(m.name ?? email.split('@')[0] ?? 'Technician').trim().slice(0, 120);
+
+  const password = `${randomBytes(18).toString('base64url')}Aa1!`;
+
+  let newUid: string;
+  try {
+    const created = await auth.createUser({
+      email,
+      password,
+      displayName,
+      emailVerified: false,
+      disabled: false,
+    });
+    newUid = created.uid;
+  } catch (e: unknown) {
+    const code = typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: string }).code) : '';
+    if (code === 'auth/email-already-exists') {
+      throw new HttpsError(
+        'already-exists',
+        'A Firebase Auth user already exists for this email. They should sign in with that account; remove this roster row or link manually.'
+      );
+    }
+    throw new HttpsError('internal', `Auth createUser failed: ${toErrorMessage(e)}`.slice(0, 480));
+  }
+
+  const batch = db.batch();
+  batch.set(
+    db.doc(`users/${newUid}`),
+    {
+      displayName,
+      email,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  batch.set(db.doc(`users/${newUid}/memberships/${companyId}`), {
+    companyId,
+    role: 'technician' as CompanyRole,
+    status: 'active',
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.update(memRef, {
+    uid: newUid,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  await batch.commit();
+
+  return { uid: newUid, temporaryPassword: password };
+});
+
+export const inviteCompanyUser = onCall(callableWithCors, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Sign in required');
   }
@@ -259,7 +362,7 @@ export const inviteCompanyUser = onCall({ cors: true }, async (request) => {
   return { inviteId: inviteRef.id, token, companyId };
 });
 
-export const acceptCompanyInvite = onCall({ cors: true }, async (request) => {
+export const acceptCompanyInvite = onCall(callableWithCors, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Sign in required');
   }
@@ -338,7 +441,7 @@ export const acceptCompanyInvite = onCall({ cors: true }, async (request) => {
   return { companyId, role };
 });
 
-export const removeCompanyMember = onCall({ cors: true }, async (request) => {
+export const removeCompanyMember = onCall(callableWithCors, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Sign in required');
   }
@@ -367,7 +470,7 @@ export const removeCompanyMember = onCall({ cors: true }, async (request) => {
   return { ok: true };
 });
 
-export const setCompanyMemberRole = onCall({ cors: true }, async (request) => {
+export const setCompanyMemberRole = onCall(callableWithCors, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Sign in required');
   }

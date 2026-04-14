@@ -3,21 +3,22 @@ import type { Firestore } from 'firebase/firestore';
 import { doc, setDoc, collection, getDocs, addDoc } from 'firebase/firestore';
 import type { TFunction } from 'i18next';
 import type { AppUser } from '../types';
-import type { CompanyMembershipRole } from '../../tenant/types';
 import { FirestoreOperationType, handleFirestoreError } from '../../../shared/lib/firestoreErrors';
 
 /**
- * Persists the current user profile and seeds demo pools/routes when tenant collections are empty.
+ * Persists the current user profile. Optionally seeds sample pools/routes only for the preset demo workspace.
+ * Real companies should pass `seedSamplePoolsAndRoutes: false` so pools/routes start empty.
  */
 export async function runDemoBootstrap(params: {
   db: Firestore;
   companyId: string;
   authUser: User;
-  membershipRole: CompanyMembershipRole | null;
   user: AppUser;
   t: TFunction;
+  /** When true (demo workspace only), creates sample pools and a route if collections are empty. */
+  seedSamplePoolsAndRoutes: boolean;
 }): Promise<void> {
-  const { db, companyId, authUser, membershipRole, user, t } = params;
+  const { db, companyId, authUser, user, t, seedSamplePoolsAndRoutes } = params;
 
   try {
     try {
@@ -32,6 +33,10 @@ export async function runDemoBootstrap(params: {
       );
     } catch (e) {
       handleFirestoreError(e, FirestoreOperationType.WRITE, `users/${authUser.uid}`, 'logOnly');
+    }
+
+    if (!seedSamplePoolsAndRoutes) {
+      return;
     }
 
     try {

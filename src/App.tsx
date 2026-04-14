@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -16,17 +16,38 @@ import ClientDashboard from './pages/ClientDashboard';
 import AcceptInvitePage from './pages/AcceptInvitePage';
 import Layout from './components/Layout';
 import CompanyOnboarding from './features/tenant/components/CompanyOnboarding';
+import Login from './pages/Login';
+
+function RequireAuth() {
+  const { authUser, loading } = useAuth();
+  const { t } = useTranslation();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600 text-sm font-medium">
+        {t('app.loading')}
+      </div>
+    );
+  }
+  if (!authUser) {
+    return <Navigate to="/login" replace />;
+  }
+  return <Outlet />;
+}
 
 const ProtectedRoute: React.FC<{
   children: React.ReactNode;
   /** If set, user must have one of these Firestore membership roles (JWT claims). */
   membershipRoles?: CompanyMembershipRole[];
 }> = ({ children, membershipRoles }) => {
-  const { membershipRole, loading, needsCompanyOnboarding } = useAuth();
+  const { membershipRole, loading, needsCompanyOnboarding, isDemoCompany } = useAuth();
   const { t } = useTranslation();
 
   if (loading) return <div className="flex items-center justify-center h-screen">{t('app.loading')}</div>;
   if (needsCompanyOnboarding) return <Navigate to="/" replace />;
+  if (isDemoCompany) {
+    return <>{children}</>;
+  }
   if (membershipRoles?.length) {
     if (!membershipRole || !membershipRoles.includes(membershipRole)) return <Navigate to="/" replace />;
     return <>{children}</>;
@@ -36,7 +57,14 @@ const ProtectedRoute: React.FC<{
 };
 
 const DashboardSwitcher = () => {
-  const { membershipRole, loading, needsCompanyOnboarding, tenantError } = useAuth();
+  const {
+    membershipRole,
+    loading,
+    needsCompanyOnboarding,
+    tenantError,
+    isDemoCompany,
+    demoDashboardView,
+  } = useAuth();
   const { t } = useTranslation();
   if (loading) return <div className="p-8 text-center">{t('app.loading')}</div>;
   if (tenantError) {
@@ -48,6 +76,11 @@ const DashboardSwitcher = () => {
     );
   }
   if (needsCompanyOnboarding) return <CompanyOnboarding />;
+  if (isDemoCompany) {
+    if (demoDashboardView === 'client') return <ClientDashboard />;
+    if (demoDashboardView === 'worker') return <WorkerDashboard />;
+    return <AdminOverview />;
+  }
   if (membershipRole === 'client') return <ClientDashboard />;
   if (membershipRole === 'technician') return <WorkerDashboard />;
   if (membershipRole === 'admin' || membershipRole === 'supervisor') return <AdminOverview />;
@@ -59,9 +92,11 @@ export default function App() {
     <AuthProvider>
       <Router>
         <Routes>
+          <Route path="/login" element={<Login />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
-          <Route path="/" element={<Layout />}>
-            <Route index element={<DashboardSwitcher />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<DashboardSwitcher />} />
             <Route
               path="pools"
               element={
@@ -110,8 +145,9 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            </Route>
           </Route>
-          <Route path="*" element={<Navigate to="/" />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Router>
       <Toaster position="top-center" richColors />

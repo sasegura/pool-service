@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, collection, query, where, onSnapshot, addDoc, updateDoc, Timestamp, getDocFromServer } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 import firebaseConfigJson from '../../firebase-applet-config.json';
@@ -25,7 +26,10 @@ export const auth = getAuth(app);
 const databaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId;
 export const db = getFirestore(app, databaseId && databaseId !== 'undefined' ? databaseId : '(default)');
 export const storage = getStorage(app);
+const functionsRegion = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
+export const functions = getFunctions(app, functionsRegion);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 // Test connection
 async function testConnection() {

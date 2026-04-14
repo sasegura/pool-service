@@ -83,15 +83,22 @@ export async function createTenantWorkspace(db: Firestore, uid: string, payload:
 }
 
 /**
- * Anonymous demo: creates a sandbox company + admin membership (same transaction shape as createTenantWorkspace).
+ * Preset demo workspace for the configured demo email (same shape as createTenantWorkspace).
+ * Company is flagged with `isDemoWorkspace` for UI (dashboard preview, relaxed demo routes).
  */
-export async function bootstrapAnonymousSandbox(db: Firestore, uid: string): Promise<string> {
+export async function bootstrapEmailDemoWorkspace(
+  db: Firestore,
+  uid: string,
+  profile: { displayName: string; email: string }
+): Promise<string> {
   const existing = await getDocs(query(collection(db, 'users', uid, 'memberships'), limit(1)));
   if (!existing.empty) {
     return existing.docs[0].id;
   }
 
   const companyRef = doc(collection(db, 'companies'));
+  const displayName = profile.displayName.trim().slice(0, 120) || 'Demo';
+  const email = profile.email.trim().toLowerCase().slice(0, 200);
 
   await runTransaction(db, async (tx) => {
     const companyId = companyRef.id;
@@ -103,15 +110,15 @@ export async function bootstrapAnonymousSandbox(db: Firestore, uid: string): Pro
       name: 'Demo workspace',
       status: 'active',
       createdByUid: uid,
-      isAnonymousSandbox: true,
+      isDemoWorkspace: true,
       createdAt: serverTimestamp(),
     });
 
     tx.set(
       userRef,
       {
-        displayName: 'Demo user',
-        email: null,
+        displayName,
+        email: email || null,
         updatedAt: serverTimestamp(),
       },
       { merge: true }
@@ -126,8 +133,8 @@ export async function bootstrapAnonymousSandbox(db: Firestore, uid: string): Pro
 
     tx.set(memberRef, {
       uid,
-      name: 'Demo user',
-      email: '',
+      name: displayName,
+      email,
       role: 'admin',
       status: 'active',
       updatedAt: serverTimestamp(),
