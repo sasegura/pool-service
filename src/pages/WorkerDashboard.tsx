@@ -471,6 +471,15 @@ export default function WorkerDashboard() {
     }
   };
 
+  const handleContinueDayUiOnly = () => {
+    setTodayRoute((prev) => (prev ? { ...prev, status: 'in-progress' } : prev));
+    setVisitStatus('idle');
+    setActivePoolIndex(null);
+    setIncidenceMode(false);
+    setNotes('');
+    setNotifyClient(true);
+  };
+
   const handleEndDay = async () => {
     if (!todayRoute || !authUid) return;
     if (!workerRoutesCommands) return;
@@ -753,12 +762,12 @@ export default function WorkerDashboard() {
           </div>
           <div className="flex gap-2">
             {todayRoute.status === 'pending' && (
-              <Button variant="primary" onClick={handleStartDay} className="gap-2">
+              <Button type="button" variant="primary" onClick={handleStartDay} className="gap-2">
                 <Play className="w-4 h-4" /> {t('worker.startDay')}
               </Button>
             )}
             {todayRoute.status === 'in-progress' && (
-              <Button variant="danger" onClick={handleEndDay} className="gap-2 shadow-lg shadow-red-100">
+              <Button type="button" variant="danger" onClick={handleEndDay} className="gap-2 shadow-lg shadow-red-100">
                 {t('worker.endDay')}
               </Button>
             )}
@@ -766,7 +775,7 @@ export default function WorkerDashboard() {
               <div className="flex flex-col items-end gap-2">
                 <div className="flex gap-2">
                   {(todayRoute.completedPools?.length || 0) < todayRoute.poolIds.length && (
-                    <Button variant="primary" onClick={handleStartDay} size="sm" className="gap-2">
+                    <Button type="button" variant="primary" onClick={handleContinueDayUiOnly} size="sm" className="gap-2">
                       <Play className="w-3 h-3" /> {t('worker.continueDay')}
                     </Button>
                   )}
