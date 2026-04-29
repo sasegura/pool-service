@@ -26,7 +26,9 @@ export const auth = getAuth(app);
 const databaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId;
 export const db = getFirestore(app, databaseId && databaseId !== 'undefined' ? databaseId : '(default)');
 export const storage = getStorage(app);
-const functionsRegion = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1';
+const rawFunctionsRegion = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION;
+const functionsRegion =
+  rawFunctionsRegion && rawFunctionsRegion !== 'undefined' ? rawFunctionsRegion : 'us-central1';
 export const functions = getFunctions(app, functionsRegion);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

@@ -42,11 +42,7 @@ export default function TeamPage() {
           role: newWorker.role,
         });
         if (newWorker.role === 'worker') {
-          const pwd = created.temporaryPassword;
-          toast.success(t('team.toastTechnicianRegistered'), {
-            description: pwd ? t('team.toastTechnicianPasswordOnce', { password: pwd }) : undefined,
-            duration: pwd ? 30_000 : 5_000,
-          });
+          toast.success(t('team.toastTechnicianRegistered'));
         } else {
           const link = `${window.location.origin}/accept-invite?companyId=${encodeURIComponent(companyId)}&inviteId=${encodeURIComponent(created.id)}`;
           toast.success(t('team.toastPreregistered'), { description: link });
@@ -55,7 +51,7 @@ export default function TeamPage() {
       setNewWorker({ name: '', email: '', role: 'worker' });
       setShowWorkerForm(false);
       setEditingUserId(null);
-    } catch {
+    } catch (e: unknown) {
       toast.error(t('team.toastSaveError'));
     }
   };

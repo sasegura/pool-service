@@ -9,13 +9,20 @@ export type CreatePreregisteredUserResult = {
   temporaryPassword?: string;
 };
 
+export type CreatePreregisteredUserInput = {
+  name: string;
+  email: string;
+  role: string;
+  password?: string;
+};
+
 export interface TeamRepository {
   subscribeUsers(onNext: TeamUsersSubscriber, onError?: (e: unknown) => void): UnsubscribeFn;
   updateUser(id: string, data: { name: string; email: string; role: string }): Promise<void>;
   /**
    * Creates a `members` row: technicians as `active` + Firebase Auth (callable); clients as `invited` (accept-invite link).
    */
-  createPreregisteredUser(data: { name: string; email: string; role: string }): Promise<CreatePreregisteredUserResult>;
+  createPreregisteredUser(data: CreatePreregisteredUserInput): Promise<CreatePreregisteredUserResult>;
   deleteUser(id: string): Promise<void>;
   setUserRole(userId: string, role: string): Promise<void>;
 }

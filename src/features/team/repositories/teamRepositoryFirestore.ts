@@ -1,4 +1,3 @@
-import { httpsCallable } from 'firebase/functions';
 import {
   addDoc,
   collection,
@@ -10,7 +9,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db, functions } from '../../../lib/firebase';
+import { db } from '../../../lib/firebase';
 import type { TeamRepository } from '../ports';
 import type { TeamUser } from '../types';
 
@@ -58,7 +57,7 @@ export function createTeamRepositoryFirestore(companyId: string): TeamRepository
       if (role === 'admin') {
         throw new Error('Cannot invite admin role');
       }
-      /** Technicians: active roster + Firebase Auth via Cloud Function. Clients: invited until accept-invite. */
+      /** Firestore-only flow: technicians are active roster rows, clients remain invited. */
       const status = role === 'technician' ? 'active' : 'invited';
       const ref = await addDoc(collection(db, 'companies', companyId, 'members'), {
         name: data.name.trim().slice(0, 120),
@@ -68,21 +67,7 @@ export function createTeamRepositoryFirestore(companyId: string): TeamRepository
         updatedAt: new Date().toISOString(),
       });
       const id = ref.id;
-
-      if (role !== 'technician') {
-        return { id };
-      }
-
-      const CALLABLE_TIMEOUT_MS = 120_000;
-      try {
-        const fn = httpsCallable(functions, 'provisionTechnicianAuthUser', { timeout: CALLABLE_TIMEOUT_MS });
-        const res = await fn({ companyId, memberDocId: id });
-        const payload = res.data as { temporaryPassword?: string };
-        return { id, temporaryPassword: payload.temporaryPassword };
-      } catch (e) {
-        await deleteDoc(doc(db, 'companies', companyId, 'members', id));
-        throw e;
-      }
+      return { id };
     },
 
     async deleteUser(id) {

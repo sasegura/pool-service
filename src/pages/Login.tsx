@@ -6,7 +6,7 @@ import {
   signInWithRedirect,
 } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Button, Card } from '../components/ui/Common';
 import { Waves, LogIn, Mail } from 'lucide-react';
 import { toast } from 'sonner';
@@ -149,6 +149,12 @@ export default function Login() {
           >
             {t('login.useDemoEmail', { email: DEMO_ACCOUNT_EMAIL })}
           </button>
+          <Link
+            to="/register"
+            className="block w-full text-center text-xs font-bold text-slate-600 hover:text-slate-800 underline-offset-2 hover:underline"
+          >
+            {t('login.switchToSignUp')}
+          </Link>
         </form>
 
         <div className="w-full flex items-center gap-3">

@@ -3,6 +3,7 @@ import Layout from '../../components/Layout';
 import AcceptInvitePage from '../../pages/AcceptInvitePage';
 import IncidentsPage from '../../pages/IncidentsPage';
 import Login from '../../pages/Login';
+import Register from '../../pages/Register';
 import PoolDetailPage from '../../pages/PoolDetailPage';
 import PoolVisitPage from '../../pages/PoolVisitPage';
 import PoolsPage from '../../pages/PoolsPage';
@@ -16,6 +17,7 @@ export function AppRouter() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/accept-invite" element={<AcceptInvitePage />} />
         <Route element={<RequireAuth />}>
           <Route path="/" element={<Layout />}>

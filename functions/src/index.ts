@@ -232,6 +232,7 @@ export const provisionTechnicianAuthUser = onCall(callableWithCors, async (reque
   const body = request.data as Record<string, unknown>;
   const companyId = typeof body.companyId === 'string' ? body.companyId : '';
   const memberDocId = typeof body.memberDocId === 'string' ? body.memberDocId : '';
+  const requestedPassword = typeof body.password === 'string' ? body.password : '';
   if (!companyId || !memberDocId) {
     throw new HttpsError('invalid-argument', 'companyId and memberDocId are required');
   }
@@ -266,7 +267,7 @@ export const provisionTechnicianAuthUser = onCall(callableWithCors, async (reque
   }
   const displayName = String(m.name ?? email.split('@')[0] ?? 'Technician').trim().slice(0, 120);
 
-  const password = `${randomBytes(18).toString('base64url')}Aa1!`;
+  const password = requestedPassword || `${randomBytes(18).toString('base64url')}Aa1!`;
 
   let newUid: string;
   try {
