@@ -1,16 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import {
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  limit,
-} from 'firebase/firestore';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
-import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card } from '../components/ui/Common';
 import { PoolStatusBadge } from '../components/PoolStatusBadge';
@@ -18,6 +9,8 @@ import { estimateVolumeM3, computeAvgDepthM } from '../lib/poolVolume';
 import { format, parseISO } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
 import type { PoolRecord, PoolVisitRecord } from '../types/pool';
+import { subscribePoolDetail } from '../features/pools/application/subscribePoolDetail';
+import { createPoolDetailRepositoryFirestore } from '../features/pools/repositories/poolDetailRepositoryFirestore';
 
 export default function PoolDetailPage() {
   const { poolId } = useParams<{ poolId: string }>();
@@ -32,31 +25,19 @@ export default function PoolDetailPage() {
 
   useEffect(() => {
     if (!poolId || !companyId) return;
-    const unsubPool = onSnapshot(doc(db, 'companies', companyId, 'pools', poolId), (snap) => {
-      if (!snap.exists()) {
-        setPool(null);
+    const repository = createPoolDetailRepositoryFirestore(companyId);
+    return subscribePoolDetail(repository, {
+      poolId,
+      maxVisits: 24,
+      onPool: (nextPool) => {
+        setPool(nextPool as PoolRecord | null);
         setLoading(false);
-        return;
-      }
-      setPool({ ...(snap.data() as Omit<PoolRecord, 'id'>), id: snap.id } as PoolRecord);
-      setLoading(false);
+      },
+      onVisits: (nextVisits) => {
+        setVisits(nextVisits as PoolVisitRecord[]);
+      },
+      onError: () => setLoading(false),
     });
-    const q = query(
-      collection(db, 'companies', companyId, 'pools', poolId, 'visits'),
-      orderBy('visitedAt', 'desc'),
-      limit(24)
-    );
-    const unsubVisits = onSnapshot(q, (snap) => {
-      setVisits(
-        snap.docs.map(
-          (d) => ({ ...(d.data() as Omit<PoolVisitRecord, 'id'>), id: d.id }) as PoolVisitRecord
-        )
-      );
-    });
-    return () => {
-      unsubPool();
-      unsubVisits();
-    };
   }, [poolId, companyId]);
 
   const computedVolume = useMemo(() => {

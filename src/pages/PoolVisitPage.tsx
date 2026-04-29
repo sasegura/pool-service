@@ -7,10 +7,12 @@ import { ArrowLeft, Droplets, Loader2, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { deepRemoveUndefined } from '../features/pools/domain/poolDraft';
 import {
-  fetchPoolById,
-  fetchRecentVisitDocs,
-  savePoolVisitWithPoolUpdate,
+  createPoolVisitRepositoryFirestore,
 } from '../features/visits/repositories/poolVisitRepositoryFirestore';
+import {
+  createPoolVisitCommands,
+  loadPoolVisitContext,
+} from '../features/visits/application/poolVisitService';
 import { Button, Card } from '../components/ui/Common';
 import { DEFAULT_MAINTENANCE_INTERVAL_DAYS } from '../constants/chemicalReference';
 import { estimateVolumeM3, computeAvgDepthM } from '../lib/poolVolume';
@@ -117,20 +119,21 @@ export default function PoolVisitPage() {
       setLoadingPool(false);
       return;
     }
+    const repository = createPoolVisitRepositoryFirestore(companyId);
     let cancelled = false;
     (async () => {
       setLoadingPool(true);
       try {
-        const poolData = await fetchPoolById(companyId, poolId);
+        const { pool: poolData, recentVisits } = await loadPoolVisitContext(repository, {
+          poolId,
+          maxRecentDocs: 5,
+        });
         if (cancelled) return;
         if (!poolData) {
           setPool(null);
           return;
         }
         setPool(poolData);
-
-        const recentVisits = await fetchRecentVisitDocs(companyId, poolId, 5);
-        if (cancelled) return;
         const bestMatch = recentVisits.find((v) => {
           const sameTech = !!user?.uid && v.technicianId === user.uid;
           const sameRoute = routeId ? v.routeId === routeId : true;
@@ -233,6 +236,8 @@ export default function PoolVisitPage() {
 
   const handleSave = async () => {
     if (!poolId || !user || !pool || !companyId) return;
+    const repository = createPoolVisitRepositoryFirestore(companyId);
+    const commands = createPoolVisitCommands(repository);
     setSaving(true);
     try {
       const visitedAt = new Date().toISOString();
@@ -274,7 +279,7 @@ export default function PoolVisitPage() {
       const nextMaint = new Date(visitedAt);
       nextMaint.setDate(nextMaint.getDate() + DEFAULT_MAINTENANCE_INTERVAL_DAYS);
 
-      await savePoolVisitWithPoolUpdate(companyId, poolId, visitPayload, (visitDocId) =>
+      await commands.savePoolVisitWithPoolUpdate(poolId, visitPayload, (visitDocId) =>
         deepRemoveUndefined({
           healthStatus: health,
           lastVisitAt: visitedAt,

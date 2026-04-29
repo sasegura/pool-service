@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PoolRecord } from '../../../types/pool';
-import type { ClientDirectoryEntry, PoolsDirectoryRepository } from '../ports';
+import type { ClientDirectoryEntry } from '../ports';
+import {
+  createPoolsDirectoryCommands,
+  subscribePoolsDirectory,
+  type PoolsDirectoryCommands,
+} from '../application/poolsDirectoryService';
 import { createPoolsDirectoryRepositoryFirestore } from '../repositories/poolsDirectoryRepositoryFirestore';
 
 export function usePoolsDirectory(enabled: boolean, companyId: string | undefined) {
@@ -12,15 +17,26 @@ export function usePoolsDirectory(enabled: boolean, companyId: string | undefine
     [companyId]
   );
 
+  const commands = useMemo(
+    () => (repository ? createPoolsDirectoryCommands(repository) : null),
+    [repository]
+  );
+
   useEffect(() => {
     if (!enabled || !repository) return;
-    const unsubPools = repository.subscribePools(setPools);
-    const unsubClients = repository.subscribeClientUsers(setClients);
-    return () => {
-      unsubPools();
-      unsubClients();
-    };
+    return subscribePoolsDirectory(repository, {
+      onPools: setPools,
+      onClients: setClients,
+      onError: () => {
+        setPools([]);
+        setClients([]);
+      },
+    });
   }, [enabled, repository]);
 
-  return { pools, clients, repository: repository as PoolsDirectoryRepository | null };
+  return {
+    pools,
+    clients,
+    commands: commands as PoolsDirectoryCommands | null,
+  };
 }

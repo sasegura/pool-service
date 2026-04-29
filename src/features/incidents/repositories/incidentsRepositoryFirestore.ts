@@ -1,6 +1,21 @@
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
+import type { IncidentsRepository } from '../ports';
 import type { ServiceIncidentLog } from '../types';
+
+export function createIncidentsRepositoryFirestore(companyId: string): IncidentsRepository {
+  return {
+    subscribePoolNames(onNext, onError) {
+      return subscribePoolNames(companyId, onNext, onError);
+    },
+    subscribeWorkerNames(onNext, onError) {
+      return subscribeWorkerNames(companyId, onNext, onError);
+    },
+    subscribeIssueIncidents(filterDate, onNext, onError) {
+      return subscribeIssueIncidents(companyId, filterDate, onNext, onError);
+    },
+  };
+}
 
 export function subscribePoolNames(
   companyId: string,

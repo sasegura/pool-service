@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { collection, addDoc, doc, deleteDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
 import {
@@ -41,7 +39,9 @@ import { MIAMI_CENTER } from '../features/routes/constants';
 import { DeferredMapMount } from '../features/routes/components/DeferredMapMount';
 import { resolveRouteNameForSave } from '../features/routes/domain/routeNaming';
 import { defaultNewRouteForm, isDatedRoute, isLegacyUndated } from '../features/routes/domain/routePredicates';
+import { createRoutesCommands } from '../features/routes/application/routesCommands';
 import { useRoutesDirectory } from '../features/routes/hooks/useRoutesDirectory';
+import { createRoutesDirectoryRepositoryFirestore } from '../features/routes/repositories/routesDirectoryRepositoryFirestore';
 import type { RouteDocument as Route, RoutesPool as Pool, RoutesWorker as Worker } from '../features/routes/types';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
@@ -56,6 +56,10 @@ export default function RoutesPage() {
   const calendarWeekdayHeaders = t('routesPage.calendarWeekdays', { returnObjects: true }) as string[];
   const { user, loading: authLoading, companyId } = useAuth();
   const { pools, workers, routes } = useRoutesDirectory(!authLoading && !!user && !!companyId, companyId ?? undefined);
+  const routesCommands = useMemo(
+    () => (companyId ? createRoutesCommands(createRoutesDirectoryRepositoryFirestore(companyId)) : null),
+    [companyId]
+  );
   const [showRouteForm, setShowRouteForm] = useState(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
@@ -283,12 +287,14 @@ export default function RoutesPage() {
       }
 
       if (editingRouteId) {
-        await updateDoc(doc(db, 'companies', companyId!, 'routes', editingRouteId), routeToSave);
+        if (!routesCommands) return;
+        await routesCommands.updateRoute(editingRouteId, routeToSave);
         toast.success(t('routesPage.toastUpdated'));
       } else {
         routeToSave.createdAt = new Date().toISOString();
         routeToSave.order = datedRoutes.length;
-        await addDoc(collection(db, 'companies', companyId!, 'routes'), routeToSave);
+        if (!routesCommands) return;
+        await routesCommands.createRoute(routeToSave);
         toast.success(t('routesPage.toastSaved'));
       }
       setNewRoute(defaultNewRouteForm());
@@ -396,7 +402,8 @@ export default function RoutesPage() {
     const label = (routeName || '').trim() || t('routesPage.deleteFallback');
     const shouldDelete = window.confirm(t('routesPage.deleteConfirm', { label }));
     if (shouldDelete) {
-      await deleteDoc(doc(db, 'companies', companyId!, 'routes', id));
+      if (!routesCommands) return;
+      await routesCommands.deleteRoute(id);
       toast.info(t('routesPage.toastDeleted'));
     }
   };
@@ -566,16 +573,7 @@ export default function RoutesPage() {
     let skipped = 0;
 
     try {
-      let batch = writeBatch(db);
-      let ops = 0;
-
-      const flush = async () => {
-        if (ops > 0) {
-          await batch.commit();
-          batch = writeBatch(db);
-          ops = 0;
-        }
-      };
+      const instancesToCreate: Record<string, unknown>[] = [];
 
       for (const [dateStr, sourceIds] of entries) {
         let p = 0;
@@ -605,8 +603,7 @@ export default function RoutesPage() {
           const srcWorker = (src.workerId || '').trim();
           const workerId = srcWorker || defaultWorker;
 
-          const ref = doc(collection(db, 'companies', companyId!, 'routes'));
-          batch.set(ref, {
+          instancesToCreate.push({
             poolIds: [...src.poolIds],
             routeName: src.routeName || '',
             workerId,
@@ -619,12 +616,11 @@ export default function RoutesPage() {
           });
           p++;
           created++;
-          ops++;
-          if (ops >= 450) await flush();
         }
       }
 
-      await flush();
+      if (!routesCommands) return;
+      await routesCommands.createPlannedInstances(instancesToCreate);
       toast.success(
         t('routesPage.toastPlanSavedFull', {
           created,
@@ -642,7 +638,8 @@ export default function RoutesPage() {
 
   const updatePlannedWorker = async (routeId: string, workerId: string) => {
     try {
-      await updateDoc(doc(db, 'companies', companyId!, 'routes', routeId), { workerId });
+      if (!routesCommands) return;
+      await routesCommands.updateRouteWorker(routeId, workerId);
       toast.success(t('routesPage.toastWorkerUpdated'));
     } catch {
       toast.error(t('routesPage.toastWorkerError'));
@@ -660,8 +657,11 @@ export default function RoutesPage() {
     const pb = b.planningPriority ?? targetIndex;
 
     try {
-      await updateDoc(doc(db, 'companies', companyId!, 'routes', a.id), { planningPriority: pb });
-      await updateDoc(doc(db, 'companies', companyId!, 'routes', b.id), { planningPriority: pa });
+      if (!routesCommands) return;
+      await routesCommands.swapPlanningPriority(
+        { routeId: a.id, planningPriority: pb },
+        { routeId: b.id, planningPriority: pa }
+      );
     } catch {
       toast.error(t('routesPage.toastReorderError'));
     }

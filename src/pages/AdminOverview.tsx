@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { updateDoc, doc } from 'firebase/firestore';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../lib/firebase';
 import { Card, Button } from '../components/ui/Common';
 import { Waves, Users, CheckCircle, AlertCircle, Clock, MapPin, Calendar as CalendarIcon, Navigation, Edit2, Check, X } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -16,6 +15,8 @@ import {
   type AdminOverviewRoute as Route,
   type AdminOverviewWorkerUser as User,
 } from '../features/admin-overview/hooks/useAdminOverviewData';
+import { createRoutesCommands } from '../features/routes/application/routesCommands';
+import { createRoutesDirectoryRepositoryFirestore } from '../features/routes/repositories/routesDirectoryRepositoryFirestore';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -59,6 +60,10 @@ export default function AdminOverview() {
   } = useAdminOverviewData(selectedDate, !loading && !!user, companyId ?? undefined);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ workerId: '', date: '' });
+  const routesCommands = useMemo(
+    () => (companyId ? createRoutesCommands(createRoutesDirectoryRepositoryFirestore(companyId)) : null),
+    [companyId]
+  );
 
   const handleStartEdit = (route: Route) => {
     setEditingRouteId(route.id);
@@ -66,9 +71,9 @@ export default function AdminOverview() {
   };
 
   const handleSaveEdit = async (routeId: string) => {
-    if (!companyId) return;
+    if (!routesCommands) return;
     try {
-      await updateDoc(doc(db, 'companies', companyId, 'routes', routeId), {
+      await routesCommands.updateRoute(routeId, {
         workerId: editData.workerId,
         date: editData.date
       });

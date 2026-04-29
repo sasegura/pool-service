@@ -1,6 +1,70 @@
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
+import type { RoutesDirectoryRepository } from '../ports';
 import type { RouteDocument, RoutesPool, RoutesWorker } from '../types';
+
+export function createRoutesDirectoryRepositoryFirestore(companyId: string): RoutesDirectoryRepository {
+  return {
+    subscribePools(onNext, onError) {
+      return subscribeRoutesPools(companyId, onNext, onError);
+    },
+    subscribeWorkers(onNext, onError) {
+      return subscribeRoutesWorkers(companyId, onNext, onError);
+    },
+    subscribeRoutes(onNext, onError) {
+      return subscribeAllRoutesDocuments(companyId, onNext, onError);
+    },
+    async createRoute(data) {
+      const ref = await addDoc(collection(db, 'companies', companyId, 'routes'), data);
+      return ref.id;
+    },
+    async updateRoute(routeId, data) {
+      await updateDoc(doc(db, 'companies', companyId, 'routes', routeId), data);
+    },
+    async deleteRoute(routeId) {
+      await deleteDoc(doc(db, 'companies', companyId, 'routes', routeId));
+    },
+    async updateRouteWorker(routeId, workerId) {
+      await updateDoc(doc(db, 'companies', companyId, 'routes', routeId), { workerId });
+    },
+    async swapPlanningPriority(first, second) {
+      await updateDoc(doc(db, 'companies', companyId, 'routes', first.routeId), {
+        planningPriority: first.planningPriority,
+      });
+      await updateDoc(doc(db, 'companies', companyId, 'routes', second.routeId), {
+        planningPriority: second.planningPriority,
+      });
+    },
+    async createPlannedInstances(instances) {
+      let batch = writeBatch(db);
+      let ops = 0;
+      const flush = async () => {
+        if (ops > 0) {
+          await batch.commit();
+          batch = writeBatch(db);
+          ops = 0;
+        }
+      };
+      for (const instance of instances) {
+        const ref = doc(collection(db, 'companies', companyId, 'routes'));
+        batch.set(ref, instance);
+        ops++;
+        if (ops >= 450) await flush();
+      }
+      await flush();
+    },
+  };
+}
 
 export function subscribeRoutesPools(
   companyId: string,

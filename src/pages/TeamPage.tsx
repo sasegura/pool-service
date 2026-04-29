@@ -11,18 +11,18 @@ import type { TeamUser } from '../features/team/types';
 export default function TeamPage() {
   const { t } = useTranslation();
   const { user, loading: authLoading, companyId } = useAuth();
-  const { allUsers, repository } = useTeamUsers(!authLoading && !!user, companyId ?? undefined);
+  const { allUsers, commands } = useTeamUsers(!authLoading && !!user, companyId ?? undefined);
   const [showWorkerForm, setShowWorkerForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [newWorker, setNewWorker] = useState({ name: '', email: '', role: 'worker' });
 
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!repository || !companyId) return;
+    if (!commands || !companyId) return;
     try {
       if (editingUserId) {
         const email = newWorker.email.trim().toLowerCase();
-        await repository.updateUser(editingUserId, {
+        await commands.updateUser(editingUserId, {
           name: newWorker.name.trim(),
           email,
           role: newWorker.role,
@@ -36,7 +36,7 @@ export default function TeamPage() {
           return;
         }
 
-        const created = await repository.createPreregisteredUser({
+        const created = await commands.createPreregisteredUser({
           name: newWorker.name.trim(),
           email,
           role: newWorker.role,
@@ -67,13 +67,13 @@ export default function TeamPage() {
   };
 
   const toggleRole = async (member: TeamUser) => {
-    if (!repository) return;
+    if (!commands) return;
     const roles: ('admin' | 'worker' | 'client')[] = ['admin', 'worker', 'client'];
     const currentIndex = roles.indexOf(member.role as 'admin' | 'worker' | 'client');
     const nextRole = roles[(currentIndex + 1) % roles.length];
 
     try {
-      await repository.setUserRole(member.id, nextRole);
+      await commands.setUserRole(member.id, nextRole);
       toast.success(t('team.roleUpdated', { role: t(`common.${nextRole}`) }));
     } catch {
       toast.error(t('team.toastRoleError'));
@@ -81,14 +81,14 @@ export default function TeamPage() {
   };
 
   const deleteUser = async (id: string) => {
-    if (!repository) return;
+    if (!commands) return;
     if (confirm(t('team.confirmDelete'))) {
-      await repository.deleteUser(id);
+      await commands.deleteUser(id);
       toast.info(t('team.toastDeleted'));
     }
   };
 
-  if (!repository) {
+  if (!commands) {
     return <div className="p-8 text-center text-slate-600">{t('common.loadingGeneric')}</div>;
   }
 

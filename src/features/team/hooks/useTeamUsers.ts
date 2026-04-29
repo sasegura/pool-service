@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { TeamRepository } from '../ports';
+import {
+  createTeamCommands,
+  subscribeTeamUsers,
+  type TeamCommands,
+} from '../application/teamUsersService';
 import { createTeamRepositoryFirestore } from '../repositories/teamRepositoryFirestore';
 import type { TeamUser } from '../types';
 
@@ -11,10 +15,18 @@ export function useTeamUsers(enabled: boolean, companyId: string | undefined) {
     [companyId]
   );
 
+  const commands = useMemo(
+    () => (repository ? createTeamCommands(repository) : null),
+    [repository]
+  );
+
   useEffect(() => {
     if (!enabled || !repository) return;
-    return repository.subscribeUsers(setAllUsers);
+    return subscribeTeamUsers(repository, {
+      onUsers: setAllUsers,
+      onError: () => setAllUsers([]),
+    });
   }, [enabled, repository]);
 
-  return { allUsers, repository: repository as TeamRepository | null };
+  return { allUsers, commands: commands as TeamCommands | null };
 }

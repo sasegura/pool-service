@@ -2,10 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { Button, Card } from '../components/ui/Common';
 import { useAuth } from '../contexts/AuthContext';
-import { auth, db } from '../lib/firebase';
+import { auth } from '../lib/firebase';
+import { acceptInvite } from '../features/tenant/application/acceptInvite';
+import { createInviteAcceptanceRepositoryFirestore } from '../features/tenant/repositories/inviteAcceptanceRepositoryFirestore';
 
 export default function AcceptInvitePage() {
   const { t } = useTranslation();
@@ -35,33 +36,10 @@ export default function AcceptInvitePage() {
     }
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const mRef = doc(db, 'companies', params.companyId, 'members', params.memberId);
-        const mSnap = await tx.get(mRef);
-        if (!mSnap.exists()) {
-          throw new Error('invite_not_found');
-        }
-        const inv = mSnap.data();
-        if (inv.status !== 'invited') {
-          throw new Error('invite_already_used');
-        }
-        const role = inv.role as string;
-        if (!['supervisor', 'technician', 'client'].includes(role)) {
-          throw new Error('invite_invalid_role');
-        }
-        const membershipRef = doc(db, 'users', u.uid, 'memberships', params.companyId);
-        tx.set(membershipRef, {
-          companyId: params.companyId,
-          role,
-          status: 'active',
-          fromInvitedMemberId: params.memberId,
-          updatedAt: serverTimestamp(),
-        });
-        tx.update(mRef, {
-          uid: u.uid,
-          status: 'active',
-          updatedAt: serverTimestamp(),
-        });
+      await acceptInvite(createInviteAcceptanceRepositoryFirestore(), {
+        companyId: params.companyId,
+        memberId: params.memberId,
+        uid: u.uid,
       });
       await refreshClaims();
       toast.success(t('tenant.inviteAccepted'));

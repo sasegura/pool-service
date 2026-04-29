@@ -1,6 +1,21 @@
 import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, updateDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { PoolRecord } from '../../../types/pool';
+import type { PoolVisitRepository } from '../ports';
+
+export function createPoolVisitRepositoryFirestore(companyId: string): PoolVisitRepository {
+  return {
+    fetchPoolById(poolId) {
+      return fetchPoolById(companyId, poolId);
+    },
+    fetchRecentVisitDocs(poolId, maxDocs) {
+      return fetchRecentVisitDocs(companyId, poolId, maxDocs);
+    },
+    savePoolVisitWithPoolUpdate(poolId, visitPayload, buildPoolUpdate) {
+      return savePoolVisitWithPoolUpdate(companyId, poolId, visitPayload, buildPoolUpdate);
+    },
+  };
+}
 
 export async function fetchPoolById(companyId: string, poolId: string): Promise<PoolRecord | null> {
   const snap = await getDoc(doc(db, 'companies', companyId, 'pools', poolId));

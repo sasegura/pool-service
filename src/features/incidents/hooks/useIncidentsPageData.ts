@@ -1,9 +1,6 @@
-import { useEffect, useState } from 'react';
-import {
-  subscribeIssueIncidents,
-  subscribePoolNames,
-  subscribeWorkerNames,
-} from '../repositories/incidentsRepositoryFirestore';
+import { useEffect, useMemo, useState } from 'react';
+import { subscribeIncidentsPageData } from '../application/incidentsPageService';
+import { createIncidentsRepositoryFirestore } from '../repositories/incidentsRepositoryFirestore';
 import type { ServiceIncidentLog } from '../types';
 
 export function useIncidentsPageData(enabled: boolean, filterDate: string, companyId: string | undefined) {
@@ -12,33 +9,34 @@ export function useIncidentsPageData(enabled: boolean, filterDate: string, compa
   const [workers, setWorkers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
+  const repository = useMemo(
+    () => (companyId ? createIncidentsRepositoryFirestore(companyId) : null),
+    [companyId]
+  );
+
   useEffect(() => {
-    if (!enabled || !companyId) {
+    if (!enabled || !repository) {
       setLoading(false);
       return;
     }
 
-    const unsubPools = subscribePoolNames(companyId, setPools);
-    const unsubWorkers = subscribeWorkerNames(companyId, setWorkers);
-    const unsubLogs = subscribeIssueIncidents(
-      companyId,
+    return subscribeIncidentsPageData(
+      repository,
       filterDate,
-      (rows) => {
-        setIncidents(rows);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching incidents:', error);
-        setLoading(false);
+      {
+        onPools: setPools,
+        onWorkers: setWorkers,
+        onIncidents: (rows) => {
+          setIncidents(rows);
+          setLoading(false);
+        },
+        onError: (error) => {
+          console.error('Error fetching incidents:', error);
+          setLoading(false);
+        },
       }
     );
-
-    return () => {
-      unsubPools();
-      unsubWorkers();
-      unsubLogs();
-    };
-  }, [enabled, filterDate, companyId]);
+  }, [enabled, filterDate, repository]);
 
   return { incidents, pools, workers, loading };
 }

@@ -20,7 +20,11 @@ export default defineConfig(({mode}) => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, 'src'),
+        '@app': path.resolve(__dirname, 'src/app'),
+        '@modules': path.resolve(__dirname, 'src/features'),
+        '@shared': path.resolve(__dirname, 'src/shared'),
+        '@infra': path.resolve(__dirname, 'src/infrastructure'),
       },
     },
     server: {
