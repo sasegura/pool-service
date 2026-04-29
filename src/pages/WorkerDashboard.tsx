@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { auth } from '../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppServices } from '../app/providers/AppServicesContext';
 import { useTranslation } from 'react-i18next';
@@ -160,6 +161,7 @@ export default function WorkerDashboard() {
   const [incidenceMode, setIncidenceMode] = useState(false);
   const [notes, setNotes] = useState('');
   const [notifyClient, setNotifyClient] = useState(true);
+  const [companyName, setCompanyName] = useState<string>('');
 
   const getRouteProgressKey = (routeId: string) => `worker:route-progress:${routeId}`;
   const getRouteProgressKeys = (route: Pick<Route, 'id' | 'templateId'>) => {
@@ -344,6 +346,22 @@ export default function WorkerDashboard() {
     if (!todayRoute?.id) return;
     persistRouteProgress(todayRoute);
   }, [todayRoute?.id, todayRoute?.status, todayRoute?.completedPools]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setCompanyName('');
+      return;
+    }
+    void (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'companies', companyId));
+        const name = snap.exists() ? String(snap.data()?.name ?? '').trim() : '';
+        setCompanyName(name);
+      } catch {
+        setCompanyName('');
+      }
+    })();
+  }, [companyId]);
 
   useEffect(() => {
     if (!todayRoute) return;
@@ -721,11 +739,15 @@ export default function WorkerDashboard() {
               <div className="space-y-2 text-[10px] font-mono text-slate-500">
                 <div className="flex justify-between border-b border-slate-100 pb-1">
                   <span>{t('worker.myUid')}</span>
-                  <span className="text-slate-900 font-bold">{user.uid}</span>
+                  <span className="text-slate-900 font-bold">{user.displayName || user.email || user.uid}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-100 pb-1">
                   <span>{t('worker.todayDate')}</span>
                   <span className="text-slate-900 font-bold">{format(new Date(), 'yyyy-MM-dd')}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span>{t('worker.companyName')}</span>
+                  <span className="text-slate-900 font-bold">{companyName || '—'}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-100 pb-1">
                   <span>{t('worker.totalRoutes')}</span>

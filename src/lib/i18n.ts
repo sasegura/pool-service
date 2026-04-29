@@ -466,8 +466,9 @@ const resources = {
         bringToToday: 'Move to today',
         noRoutesAvailable: 'No routes available to choose right now.',
         diagnosticsTitle: 'Diagnostics',
-        myUid: 'My UID:',
+        myUid: 'My user:',
         todayDate: 'Today:',
+        companyName: 'Company:',
         totalRoutes: 'Total routes:',
         missingMapsKeyTitle: 'Google Maps API key missing',
         missingMapsKeyBody:
@@ -1076,8 +1077,9 @@ const resources = {
         bringToToday: 'Traer a hoy',
         noRoutesAvailable: 'No hay rutas disponibles para elegir en este momento.',
         diagnosticsTitle: 'Información de diagnóstico',
-        myUid: 'Mi UID:',
+        myUid: 'Mi usuario:',
         todayDate: 'Fecha hoy:',
+        companyName: 'Compania:',
         totalRoutes: 'Rutas totales:',
         missingMapsKeyTitle: 'Falta la API key de Google Maps',
         missingMapsKeyBody:
