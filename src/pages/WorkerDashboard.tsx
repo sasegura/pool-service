@@ -12,10 +12,11 @@ import { es, enUS } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
-import { getGoogleMapsApiKey } from '../config/env';
+import { getGoogleMapsApiKey, isMapsIntegrationEnabled } from '../config/env';
 import { resolveWorkerDashboardState } from '../features/worker-dashboard/application/resolveWorkerDashboardState';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const MAPS_INTEGRATION_ENABLED = isMapsIntegrationEnabled();
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
 import type { PoolRecord } from '../types/pool';
@@ -303,6 +304,7 @@ export default function WorkerDashboard() {
   }, [authLoading, authUid, user?.uid, companyId, workerRoutesRepository]);
 
   useEffect(() => {
+    if (!MAPS_INTEGRATION_ENABLED) return;
     if (!user || !todayRoute || todayRoute.status !== 'in-progress') return;
 
     if (!navigator.geolocation) {
@@ -728,23 +730,10 @@ export default function WorkerDashboard() {
     );
   }
 
-  const isInvalidKey = !GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'MY_GOOGLE_MAPS_API_KEY';
-
-  if (isInvalidKey) {
-    return (
-      <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
-        <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-amber-900 mb-2">{t('worker.missingMapsKeyTitle')}</h2>
-        <p className="text-sm text-amber-700">
-          {t('worker.missingMapsKeyBody')}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
-      <div className="space-y-6">
+  const canUseMaps =
+    MAPS_INTEGRATION_ENABLED && !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY';
+  const content = (
+    <div className="space-y-6">
         <header className="flex items-center justify-between">
           <div className="flex items-start gap-3">
             <Button
@@ -795,29 +784,30 @@ export default function WorkerDashboard() {
           </div>
         </header>
 
-        {/* Route Map */}
-        <Card className="overflow-hidden h-64 relative border-none shadow-lg">
-          <div className="absolute inset-0 z-0 min-h-[16rem]">
-            <WorkerRouteMap
-              poolIds={todayRoute.poolIds}
-              pools={pools}
-              completedPoolIds={todayRoute.completedPools}
-            />
-          </div>
-          <div className="absolute bottom-4 left-4 right-4 z-10 bg-white/90 backdrop-blur p-3 rounded-xl shadow-xl flex items-center justify-between pointer-events-none">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-                <MapIcon className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t('worker.progress')}</div>
-                <div className="text-sm font-black text-slate-900">
-                  {t('worker.poolsProgress', { done: todayRoute.completedPools?.length || 0, total: todayRoute.poolIds.length })}
+        {canUseMaps ? (
+          <Card className="overflow-hidden h-64 relative border-none shadow-lg">
+            <div className="absolute inset-0 z-0 min-h-[16rem]">
+              <WorkerRouteMap
+                poolIds={todayRoute.poolIds}
+                pools={pools}
+                completedPoolIds={todayRoute.completedPools}
+              />
+            </div>
+            <div className="absolute bottom-4 left-4 right-4 z-10 bg-white/90 backdrop-blur p-3 rounded-xl shadow-xl flex items-center justify-between pointer-events-none">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                  <MapIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t('worker.progress')}</div>
+                  <div className="text-sm font-black text-slate-900">
+                    {t('worker.poolsProgress', { done: todayRoute.completedPools?.length || 0, total: todayRoute.poolIds.length })}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        ) : null}
 
         <div className="space-y-4">
         {todayRoute.poolIds.map((poolId, index) => {
@@ -969,7 +959,9 @@ export default function WorkerDashboard() {
           );
         })}
       </div>
-    </div>
-    </APIProvider>
+      </div>
   );
+
+  if (!canUseMaps) return content;
+  return <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>{content}</APIProvider>;
 }

@@ -8,6 +8,13 @@ export function getGoogleMapsApiKey(): string | undefined {
   return k;
 }
 
+export function isMapsIntegrationEnabled(): boolean {
+  const raw = import.meta.env.VITE_ENABLE_MAPS_INTEGRATION;
+  if (!raw || raw === 'undefined') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== 'false' && normalized !== '0' && normalized !== 'off' && normalized !== 'no';
+}
+
 /**
  * Gemini API key: from Vite `define` mapping `GEMINI_API_KEY` in .env (see vite.config.ts),
  * or `VITE_GEMINI_API_KEY` if set for client-side use.

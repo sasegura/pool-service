@@ -35,7 +35,7 @@ import { optimizeRoute } from '../services/geminiService';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppServices } from '../app/providers/AppServicesContext';
 import { useTranslation } from 'react-i18next';
-import { getGoogleMapsApiKey } from '../config/env';
+import { getGoogleMapsApiKey, isMapsIntegrationEnabled } from '../config/env';
 import { MIAMI_CENTER } from '../features/routes/constants';
 import { DeferredMapMount } from '../features/routes/components/DeferredMapMount';
 import { resolveRouteNameForSave } from '../features/routes/domain/routeNaming';
@@ -44,6 +44,7 @@ import { useRoutesDirectory } from '../features/routes/hooks/useRoutesDirectory'
 import type { RouteDocument as Route, RoutesPool as Pool, RoutesWorker as Worker } from '../features/routes/types';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const MAPS_INTEGRATION_ENABLED = isMapsIntegrationEnabled();
 
 /** Ocultar navegación Semana − / + junto al selector de fecha (reactivar cuando haga falta) */
 const SHOW_CALENDAR_WEEK_STEPPER = false;
@@ -77,6 +78,8 @@ export default function RoutesPage() {
   );
   /** Si la ruta origen no lleva técnico, las instancias usarán este (vacío = primer técnico de la lista) */
   const [fallbackWorkerIdForPlan, setFallbackWorkerIdForPlan] = useState('');
+  const canUseMaps =
+    MAPS_INTEGRATION_ENABLED && !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY';
 
   const weeklyRequiresAtLeastOneDay = useMemo(
     () =>
@@ -325,6 +328,11 @@ export default function RoutesPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [showRouteForm]);
+
+  useEffect(() => {
+    if (canUseMaps) return;
+    if (routeViewMode !== 'list') setRouteViewMode('list');
+  }, [canUseMaps, routeViewMode]);
 
   const handleEdit = (route: Route) => {
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -663,22 +671,12 @@ export default function RoutesPage() {
     }
   };
 
-  if (!GOOGLE_MAPS_API_KEY) {
-    return (
-      <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
-        <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-amber-900 mb-2">{t('routesPage.missingMapsKey')}</h2>
-      </div>
-    );
-  }
-
   if (!companyId) {
     return <div className="p-8 text-center text-slate-600">{t('common.loadingGeneric')}</div>;
   }
 
-  return (
-    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
-      <div className="space-y-6">
+  const content = (
+    <div className="space-y-6">
         <div className="space-y-2">
           <h2 className="text-2xl font-black text-slate-900">{t('routesPage.title')}</h2>
           <div className="flex items-start justify-between gap-3">
@@ -903,16 +901,18 @@ export default function RoutesPage() {
                     >
                       <List className="w-4 h-4" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setRouteViewMode('map')}
-                      className={cn(
-                        'p-1.5 rounded-md',
-                        routeViewMode === 'map' ? 'bg-blue-50 text-blue-600' : 'text-slate-400'
-                      )}
-                    >
-                      <MapIcon className="w-4 h-4" />
-                    </button>
+                    {canUseMaps ? (
+                      <button
+                        type="button"
+                        onClick={() => setRouteViewMode('map')}
+                        className={cn(
+                          'p-1.5 rounded-md',
+                          routeViewMode === 'map' ? 'bg-blue-50 text-blue-600' : 'text-slate-400'
+                        )}
+                      >
+                        <MapIcon className="w-4 h-4" />
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -1365,7 +1365,7 @@ export default function RoutesPage() {
           </Card>
         )}
 
-        {!showRouteForm && (
+        {!showRouteForm && canUseMaps && (
           <Card className="p-4 border-blue-200 bg-white overflow-hidden">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-slate-900 flex items-center gap-2">
@@ -1614,6 +1614,8 @@ export default function RoutesPage() {
         )}
 
       </div>
-    </APIProvider>
   );
+
+  if (!canUseMaps) return content;
+  return <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>{content}</APIProvider>;
 }

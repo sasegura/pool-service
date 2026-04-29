@@ -46,6 +46,7 @@ export function PoolForm({
   apiError,
   setApiError,
   showPickerMap,
+  mapsEnabled,
   onSubmit,
   onCancel,
 }: {
@@ -59,6 +60,7 @@ export function PoolForm({
   apiError: string | null;
   setApiError: (v: string | null) => void;
   showPickerMap: boolean;
+  mapsEnabled: boolean;
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
 }) {
@@ -154,23 +156,25 @@ export function PoolForm({
                   }}
                   placeholder={t('pools.placeholderAddress')}
                 />
-                <Geocoder
-                  address={draft.address}
-                  onResult={(res) => {
-                    setDraft((prev) => ({ ...prev, coordinates: res.coords }));
-                    setIsAddressValidated(true);
-                    setGeocodeFormattedAddress(res.formattedAddress ?? null);
-                    setGeocodeMapFocus((prev) => ({
-                      seq: (prev?.seq ?? 0) + 1,
-                      viewport: res.viewport ?? null,
-                      center: res.coords,
-                    }));
-                    requestAnimationFrame(() => {
-                      mapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    });
-                  }}
-                  setApiError={setApiError}
-                />
+                {mapsEnabled ? (
+                  <Geocoder
+                    address={draft.address}
+                    onResult={(res) => {
+                      setDraft((prev) => ({ ...prev, coordinates: res.coords }));
+                      setIsAddressValidated(true);
+                      setGeocodeFormattedAddress(res.formattedAddress ?? null);
+                      setGeocodeMapFocus((prev) => ({
+                        seq: (prev?.seq ?? 0) + 1,
+                        viewport: res.viewport ?? null,
+                        center: res.coords,
+                      }));
+                      requestAnimationFrame(() => {
+                        mapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      });
+                    }}
+                    setApiError={setApiError}
+                  />
+                ) : null}
               </div>
               {isAddressValidated && (
                 <p className="text-[10px] text-emerald-600 font-bold mt-1 flex items-center gap-1">
@@ -216,50 +220,52 @@ export function PoolForm({
               )}
             </div>
 
-          <div
-            ref={mapSectionRef}
-            className="h-56 sm:h-72 max-h-[min(28rem,55vh)] min-h-[12rem] rounded-xl overflow-hidden border border-slate-200 relative"
-          >
-            {showPickerMap ? (
-              <Map
-                defaultCenter={draft.coordinates ?? MIAMI_CENTER}
-                center={draft.coordinates ?? MIAMI_CENTER}
-                defaultZoom={15}
-                onClick={(e) => {
-                  if (e.detail.latLng) {
-                    setDraft((prev) => ({ ...prev, coordinates: e.detail.latLng! }));
-                    setIsAddressValidated(true);
-                    setGeocodeFormattedAddress(null);
-                  }
-                }}
-              >
-                <MapGeocodeFocus target={geocodeMapFocus} />
-                <Marker
-                  position={draft.coordinates ?? MIAMI_CENTER}
-                  draggable
-                  title={geocodeFormattedAddress ?? (draft.address || undefined)}
-                  onDragEnd={(e) => {
-                    const latLng = e.latLng;
-                    if (!latLng) return;
-                    setDraft((prev) => ({
-                      ...prev,
-                      coordinates: { lat: latLng.lat(), lng: latLng.lng() },
-                    }));
-                    setIsAddressValidated(true);
-                    setGeocodeFormattedAddress(null);
+          {mapsEnabled ? (
+            <div
+              ref={mapSectionRef}
+              className="h-56 sm:h-72 max-h-[min(28rem,55vh)] min-h-[12rem] rounded-xl overflow-hidden border border-slate-200 relative"
+            >
+              {showPickerMap ? (
+                <Map
+                  defaultCenter={draft.coordinates ?? MIAMI_CENTER}
+                  center={draft.coordinates ?? MIAMI_CENTER}
+                  defaultZoom={15}
+                  onClick={(e) => {
+                    if (e.detail.latLng) {
+                      setDraft((prev) => ({ ...prev, coordinates: e.detail.latLng! }));
+                      setIsAddressValidated(true);
+                      setGeocodeFormattedAddress(null);
+                    }
                   }}
-                />
-              </Map>
-            ) : (
-              <div className="h-full w-full bg-slate-100 animate-pulse" aria-hidden />
-            )}
-            <div className="absolute top-2 left-2 right-2 max-w-[calc(100%-1rem)] bg-white/90 backdrop-blur px-2 py-1.5 rounded text-[10px] font-bold shadow-sm space-y-0.5">
-              <p>{isAddressValidated ? t('pools.mapConfirmed') : t('pools.mapClickAdjust')}</p>
-              {geocodeFormattedAddress ? (
-                <p className="font-normal text-slate-600 line-clamp-2 normal-case">{geocodeFormattedAddress}</p>
-              ) : null}
+                >
+                  <MapGeocodeFocus target={geocodeMapFocus} />
+                  <Marker
+                    position={draft.coordinates ?? MIAMI_CENTER}
+                    draggable
+                    title={geocodeFormattedAddress ?? (draft.address || undefined)}
+                    onDragEnd={(e) => {
+                      const latLng = e.latLng;
+                      if (!latLng) return;
+                      setDraft((prev) => ({
+                        ...prev,
+                        coordinates: { lat: latLng.lat(), lng: latLng.lng() },
+                      }));
+                      setIsAddressValidated(true);
+                      setGeocodeFormattedAddress(null);
+                    }}
+                  />
+                </Map>
+              ) : (
+                <div className="h-full w-full bg-slate-100 animate-pulse" aria-hidden />
+              )}
+              <div className="absolute top-2 left-2 right-2 max-w-[calc(100%-1rem)] bg-white/90 backdrop-blur px-2 py-1.5 rounded text-[10px] font-bold shadow-sm space-y-0.5">
+                <p>{isAddressValidated ? t('pools.mapConfirmed') : t('pools.mapClickAdjust')}</p>
+                {geocodeFormattedAddress ? (
+                  <p className="font-normal text-slate-600 line-clamp-2 normal-case">{geocodeFormattedAddress}</p>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="border-t border-blue-100 pt-3 space-y-3">
             <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">{t('poolForm.sectionDims')}</p>

@@ -10,7 +10,7 @@ import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppServices } from '../app/providers/AppServicesContext';
 import { useTranslation } from 'react-i18next';
-import { getGoogleMapsApiKey } from '../config/env';
+import { getGoogleMapsApiKey, isMapsIntegrationEnabled } from '../config/env';
 import {
   useAdminOverviewData,
   type AdminOverviewRoute as Route,
@@ -18,6 +18,7 @@ import {
 } from '../features/admin-overview/hooks/useAdminOverviewData';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const MAPS_INTEGRATION_ENABLED = isMapsIntegrationEnabled();
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
 
 function AdminOverviewTrackingMap({ workers }: { workers: User[] }) {
@@ -60,6 +61,8 @@ export default function AdminOverview() {
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ workerId: '', date: '' });
   const { routesCommands } = useAppServices();
+  const canUseMaps =
+    MAPS_INTEGRATION_ENABLED && !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY';
 
   const handleStartEdit = (route: Route) => {
     setEditingRouteId(route.id);
@@ -295,46 +298,40 @@ export default function AdminOverview() {
         </div>
 
         <div className="space-y-6">
-          <Card className="overflow-hidden border-slate-200">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-blue-600" /> {t('admin.mapRealtimeTitle')}
-              </h3>
-            </div>
-            <div className="h-[400px] relative">
-              {GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY' ? (
+          {canUseMaps ? (
+            <Card className="overflow-hidden border-slate-200">
+              <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Navigation className="w-4 h-4 text-blue-600" /> {t('admin.mapRealtimeTitle')}
+                </h3>
+              </div>
+              <div className="h-[400px] relative">
                 <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
                   <AdminOverviewTrackingMap workers={liveWorkers} />
                 </APIProvider>
-              ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-slate-400 text-xs text-center p-8">
-                  <AlertCircle className="w-8 h-8 mb-2 text-amber-500" />
-                  <p className="font-bold text-slate-600 mb-1">{t('admin.mapDisabledTitle')}</p>
-                  <p>{t('admin.mapDisabledBody')}</p>
-                </div>
-              )}
-            </div>
-            <div className="p-4 bg-white">
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">{t('admin.activeTechnicians')}</h4>
-              <div className="space-y-3">
-                {liveWorkers.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">{t('admin.noGpsWorkers')}</p>
-                ) : (
-                  liveWorkers.map(worker => (
-                    <div key={worker.id} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-xs font-bold text-slate-700">{worker.name}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {worker.lastActive?.toDate ? format(worker.lastActive.toDate(), 'HH:mm:ss') : t('admin.momentAgo')}
-                      </span>
-                    </div>
-                  ))
-                )}
               </div>
-            </div>
-          </Card>
+              <div className="p-4 bg-white">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">{t('admin.activeTechnicians')}</h4>
+                <div className="space-y-3">
+                  {liveWorkers.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">{t('admin.noGpsWorkers')}</p>
+                  ) : (
+                    liveWorkers.map(worker => (
+                      <div key={worker.id} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-xs font-bold text-slate-700">{worker.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {worker.lastActive?.toDate ? format(worker.lastActive.toDate(), 'HH:mm:ss') : t('admin.momentAgo')}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </Card>
+          ) : null}
         </div>
       </div>
     </div>

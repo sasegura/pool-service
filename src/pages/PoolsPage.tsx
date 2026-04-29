@@ -9,7 +9,7 @@ import { APIProvider } from '@vis.gl/react-google-maps';
 import type { PoolRecord } from '../types/pool';
 import { computeAvgDepthM, estimateVolumeM3 } from '../lib/poolVolume';
 import { PoolStatusBadge } from '../components/PoolStatusBadge';
-import { getGoogleMapsApiKey } from '../config/env';
+import { getGoogleMapsApiKey, isMapsIntegrationEnabled } from '../config/env';
 import { initialPoolDraft, parsePositiveNumber, type PoolDraft } from '../features/pools/domain/poolDraft';
 import {
   isPoolClientInDirectory,
@@ -22,6 +22,7 @@ import { usePoolsDirectory } from '../features/pools/hooks/usePoolsDirectory';
 import { PoolForm } from '../features/pools/components/PoolForm';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const MAPS_INTEGRATION_ENABLED = isMapsIntegrationEnabled();
 
 export default function PoolsPage() {
   const { t } = useTranslation();
@@ -125,13 +126,14 @@ export default function PoolsPage() {
     }
   };
 
-  const isInvalidKey = !GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'MY_GOOGLE_MAPS_API_KEY';
+  const canUseMaps =
+    MAPS_INTEGRATION_ENABLED && !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY';
 
   if (!commands) {
     return <div className="p-8 text-center text-slate-600">{t('common.loadingGeneric')}</div>;
   }
 
-  if (isInvalidKey) {
+  if (MAPS_INTEGRATION_ENABLED && !canUseMaps) {
     return (
       <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200">
         <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-4" />
@@ -141,9 +143,8 @@ export default function PoolsPage() {
     );
   }
 
-  return (
-    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
-      <div className="space-y-6">
+  const content = (
+    <div className="space-y-6">
         <div className="flex justify-between items-center">
           <h2 className="text-2xl font-black text-slate-900">{t('pools.title')}</h2>
           <Button
@@ -172,6 +173,7 @@ export default function PoolsPage() {
             apiError={apiError}
             setApiError={setApiError}
             showPickerMap={showPickerMap}
+            mapsEnabled={canUseMaps}
             onSubmit={handleAddPool}
             onCancel={() => {
               setShowPoolForm(false);
@@ -244,6 +246,8 @@ export default function PoolsPage() {
           ))}
         </div>
       </div>
-    </APIProvider>
   );
+
+  if (!canUseMaps) return content;
+  return <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>{content}</APIProvider>;
 }

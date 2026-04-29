@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MEASUREMENT_ID: string
   readonly VITE_FIREBASE_FIRESTORE_DATABASE_ID: string
   readonly VITE_GOOGLE_MAPS_API_KEY: string
+  readonly VITE_ENABLE_MAPS_INTEGRATION?: string
   readonly VITE_GEMINI_API_KEY?: string
 }
 
