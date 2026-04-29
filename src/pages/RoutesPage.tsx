@@ -683,24 +683,24 @@ export default function RoutesPage() {
   return (
     <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-black text-slate-900">{t('routesPage.title')}</h2>
-            <p className="text-sm text-slate-500 mt-1">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-black text-slate-900">{t('routesPage.title')}</h2>
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-slate-500 mt-1 min-w-0">
               {t('routesPage.subtitle')}
             </p>
+            <Button
+              size="sm"
+              onClick={() => {
+                setShowRouteForm(true);
+                setEditingRouteId(null);
+                setNewRoute(defaultNewRouteForm());
+              }}
+              className="gap-1 shrink-0"
+            >
+              <Plus className="w-4 h-4" /> {t('routesPage.newRoute')}
+            </Button>
           </div>
-          <Button
-            size="sm"
-            onClick={() => {
-              setShowRouteForm(true);
-              setEditingRouteId(null);
-              setNewRoute(defaultNewRouteForm());
-            }}
-            className="gap-1 shrink-0"
-          >
-            <Plus className="w-4 h-4" /> {t('routesPage.newRoute')}
-          </Button>
         </div>
 
         {showRouteForm && (
@@ -723,7 +723,7 @@ export default function RoutesPage() {
               >
                 <X className="w-5 h-5" />
               </button>
-              <form onSubmit={handleAddRoute} className="space-y-4 p-4 pr-14">
+              <form onSubmit={handleAddRoute} className="space-y-4 p-4 sm:pr-14">
               <h3 id="route-form-title" className="font-bold text-blue-900">
                 {editingRouteId ? t('routesPage.editRoute') : t('routesPage.newRouteForm')}
               </h3>
@@ -735,7 +735,7 @@ export default function RoutesPage() {
                   </label>
                   <input
                     type="date"
-                    className="w-full max-w-xs rounded-lg border-slate-200 p-2 text-sm"
+                    className="w-full rounded-lg border-slate-200 p-2 text-sm"
                     value={newRoute.date}
                     onChange={(e) => setNewRoute({ ...newRoute, date: e.target.value })}
                   />
@@ -896,19 +896,6 @@ export default function RoutesPage() {
                   {t('routesPage.poolsStopOrder')}
                 </label>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleOptimize}
-                    disabled={isOptimizing || newRoute.poolIds.length < 2}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                  >
-                    {isOptimizing ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-3 h-3" />
-                    )}
-                    {t('routesPage.optimizeAI')}
-                  </button>
                   <div className="flex bg-white p-0.5 rounded-lg border border-slate-200">
                     <button
                       type="button"
@@ -1118,23 +1105,34 @@ export default function RoutesPage() {
               {t('routesPage.weeklyCalendarHelp')}
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2">
               {weeklyPlanningDays.map((day) => (
                 <div
                   key={day.dateStr}
                   className={cn(
-                    'rounded-xl border p-2 space-y-1',
+                    'rounded-xl border p-2 space-y-1 cursor-pointer',
                     day.dateStr === planningSelectedDate
                       ? 'border-indigo-400 bg-indigo-50/40'
                       : 'border-slate-200 bg-white'
                   )}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setPlanningSelectedDate(day.dateStr)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setPlanningSelectedDate(day.dateStr);
+                    }
+                  }}
                 >
                   <button
                     type="button"
-                    className="text-left w-full"
+                    className="text-left w-full min-w-0"
                     onClick={() => setPlanningSelectedDate(day.dateStr)}
                   >
-                    <div className="text-[10px] font-black uppercase text-slate-500">{day.label}</div>
+                    <div className="text-[10px] font-black uppercase text-slate-500 truncate leading-tight">
+                      {day.label}
+                    </div>
                   </button>
                   <div className="space-y-1">
                     {day.routes.length === 0 ? (

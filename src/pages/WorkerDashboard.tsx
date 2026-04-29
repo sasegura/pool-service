@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
-import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle, Droplets } from 'lucide-react';
+import { MapPin, Navigation, CheckCircle2, AlertTriangle, Clock, Play, Map as MapIcon, Loader2, AlertCircle, Droplets, X, ArrowLeft } from 'lucide-react';
 import { format, parseISO, getDay, addDays, startOfDay } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -46,8 +46,25 @@ interface Route {
   planningPriority?: number;
 }
 
+type PersistedRouteProgress = {
+  status?: Route['status'];
+  completedPools?: string[];
+};
+
 const removeUndefinedFields = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
   Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as Partial<T>;
+
+const statusRank: Record<Route['status'], number> = {
+  pending: 0,
+  'in-progress': 1,
+  completed: 2,
+};
+
+const getIsoTime = (value?: string) => {
+  if (!value) return 0;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? 0 : ms;
+};
 
 function WorkerRouteMap({
   poolIds,
@@ -119,15 +136,18 @@ export default function WorkerDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const authUid = auth.currentUser?.uid ?? user?.uid;
   /** Rutas antiguas usan `user.uid` (p. ej. demo-worker-id); las nuevas usan el UID real de Auth. */
+  const normalizeOwnerId = (value?: string | null) => (value || '').trim().toLowerCase();
+
   const routeOwnerIds = React.useMemo(() => {
     const ids = new Set<string>();
-    if (authUid) ids.add(authUid);
-    if (user?.uid) ids.add(user.uid);
+    if (authUid) ids.add(normalizeOwnerId(authUid));
+    if (user?.uid) ids.add(normalizeOwnerId(user.uid));
+    if (user?.email) ids.add(normalizeOwnerId(user.email));
     return ids;
-  }, [authUid, user?.uid]);
+  }, [authUid, user?.uid, user?.email]);
 
   const isMyWorkerRoute = (workerId?: string | null) =>
-    Boolean(workerId && routeOwnerIds.has(workerId));
+    Boolean(workerId && routeOwnerIds.has(normalizeOwnerId(workerId)));
 
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
   const [todayRoute, setTodayRoute] = useState<Route | null>(null);
@@ -142,6 +162,60 @@ export default function WorkerDashboard() {
   const [incidenceMode, setIncidenceMode] = useState(false);
   const [notes, setNotes] = useState('');
   const [notifyClient, setNotifyClient] = useState(true);
+
+  const getRouteProgressKey = (routeId: string) => `worker:route-progress:${routeId}`;
+  const getRouteProgressKeys = (route: Pick<Route, 'id' | 'templateId'>) => {
+    const keys = [getRouteProgressKey(route.id)];
+    if (route.templateId) keys.push(getRouteProgressKey(route.templateId));
+    return keys;
+  };
+
+  const loadPersistedRouteProgress = (route: Pick<Route, 'id' | 'templateId'>): PersistedRouteProgress | null => {
+    const keys = getRouteProgressKeys(route);
+    for (const key of keys) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        return JSON.parse(raw) as PersistedRouteProgress;
+      } catch {
+        // ignore invalid storage entry and continue
+      }
+    }
+    return null;
+  };
+
+  const mergeRouteStatus = (remoteStatus?: Route['status'], localStatus?: Route['status']): Route['status'] => {
+    const candidates = [remoteStatus, localStatus].filter(Boolean) as Route['status'][];
+    if (candidates.length === 0) return 'pending';
+    return candidates.reduce((best, current) => (statusRank[current] > statusRank[best] ? current : best));
+  };
+
+  const hydrateRouteProgress = (route: Route): Route => {
+    const persisted = loadPersistedRouteProgress(route);
+    if (!persisted) return route;
+    const mergedCompletedPools = Array.from(
+      new Set([...(route.completedPools || []), ...(persisted.completedPools || [])])
+    );
+    return {
+      ...route,
+      status: mergeRouteStatus(route.status, persisted.status),
+      completedPools: mergedCompletedPools,
+    };
+  };
+
+  const persistRouteProgress = (route: Pick<Route, 'id' | 'templateId' | 'status' | 'completedPools'>) => {
+    try {
+      const payload: PersistedRouteProgress = {
+        status: route.status,
+        completedPools: route.completedPools || [],
+      };
+      getRouteProgressKeys(route).forEach((key) => {
+        localStorage.setItem(key, JSON.stringify(payload));
+      });
+    } catch {
+      // no-op: localStorage can fail in private mode or restricted environments
+    }
+  };
 
   const isRouteActiveToday = (route: Route, dateStr: string) => {
     const targetDate = startOfDay(parseISO(dateStr));
@@ -202,39 +276,84 @@ export default function WorkerDashboard() {
       
       // 1. Find a specific daily instance for today (prioridad de planificación si hay varias)
       const dailyInstances = allRoutes.filter(r => isMyWorkerRoute(r.workerId) && r.date === today);
-      const prioritizedDailyInstances = dailyInstances.sort(
-        (a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0)
-      );
-      const dailyInstance = prioritizedDailyInstances.find((r) => r.status !== 'completed');
-      
+      const activeDailyInstances = dailyInstances.filter((r) => r.status !== 'completed');
+      const completedDailyInstances = dailyInstances.filter((r) => r.status === 'completed');
+
+      const sortByCurrentPriority = (a: Route, b: Route) => {
+        const statusDiff = statusRank[b.status] - statusRank[a.status];
+        if (statusDiff !== 0) return statusDiff;
+        const startDiff = getIsoTime(b.startTime) - getIsoTime(a.startTime);
+        if (startDiff !== 0) return startDiff;
+        return (a.planningPriority ?? 0) - (b.planningPriority ?? 0);
+      };
+
+      const sortByCompletedPriority = (a: Route, b: Route) => {
+        const completedDiff = (b.completedPools?.length || 0) - (a.completedPools?.length || 0);
+        if (completedDiff !== 0) return completedDiff;
+        const timeDiff = getIsoTime(b.endTime) - getIsoTime(a.endTime);
+        if (timeDiff !== 0) return timeDiff;
+        return (a.planningPriority ?? 0) - (b.planningPriority ?? 0);
+      };
+
+      const dailyInstance =
+        [...activeDailyInstances].sort(sortByCurrentPriority)[0] ||
+        [...completedDailyInstances].sort(sortByCompletedPriority)[0];
+
       if (dailyInstance) {
-        setTodayRoute(dailyInstance);
+        // Mantener la instancia real del día (incluso si está completada)
+        // para conservar piscinas terminadas y estado al recargar.
+        setTodayRoute(hydrateRouteProgress(dailyInstance));
       } else {
         // 2. Look for a weekly/scheduled assignment
         const assignedRoute = allRoutes.find(r => isMyWorkerRoute(r.workerId) && isRouteActiveToday(r, today));
         if (assignedRoute) {
           // Virtual route: needs instantiation
-          setTodayRoute({
+          setTodayRoute(hydrateRouteProgress({
             ...assignedRoute,
             status: 'pending',
             completedPools: [],
             date: today,
             isVirtual: true
-          } as any);
+          } as any));
         } else {
           setTodayRoute(null);
         }
       }
 
-      // 3. Available routes (templates or unassigned for today)
-      const available = allRoutes.filter(r => {
-        const isTemplate = !r.date && !r.startDate && !r.assignedDay;
-        const isUnassignedToday = r.date === today && !r.workerId;
-        return (isTemplate || isUnassignedToday) && (!r.workerId || isMyWorkerRoute(r.workerId));
+      // 3. Available routes (templates or unassigned for today) with real progress if a daily instance exists
+      const dailyByTemplateId = new globalThis.Map<string, Route>();
+      dailyInstances.forEach((instance) => {
+        const templateId = instance.templateId;
+        if (!templateId) return;
+        const current = dailyByTemplateId.get(templateId);
+        if (!current) {
+          dailyByTemplateId.set(templateId, instance);
+          return;
+        }
+        const currentScore = current.completedPools?.length || 0;
+        const nextScore = instance.completedPools?.length || 0;
+        if (nextScore >= currentScore) dailyByTemplateId.set(templateId, instance);
       });
+
+      const available = allRoutes
+        .filter((r) => {
+          const isTemplate = !r.date && !r.startDate && !r.assignedDay;
+          const isUnassignedToday = r.date === today && !r.workerId;
+          return (isTemplate || isUnassignedToday) && (!r.workerId || isMyWorkerRoute(r.workerId));
+        })
+        .map((route) => {
+          const linkedDaily = dailyByTemplateId.get(route.id);
+          if (!linkedDaily) return hydrateRouteProgress(route);
+          const hydratedDaily = hydrateRouteProgress(linkedDaily);
+          return {
+            ...route,
+            status: hydratedDaily.status,
+            completedPools: hydratedDaily.completedPools,
+          } as Route;
+        });
       setAvailableRoutes(available);
       
-      setHasOtherRoutes(allRoutes.some(r => isMyWorkerRoute(r.workerId) && r.date !== today));
+      setHasOtherRoutes(allRoutes.some(r => isMyWorkerRoute(r.workerId)));
       setLoading(false);
     }, (error) => {
       console.error("Error fetching routes:", error);
@@ -295,6 +414,11 @@ export default function WorkerDashboard() {
   }, [authUid, user, todayRoute?.status, companyId]);
 
   useEffect(() => {
+    if (!todayRoute?.id) return;
+    persistRouteProgress(todayRoute);
+  }, [todayRoute?.id, todayRoute?.status, todayRoute?.completedPools]);
+
+  useEffect(() => {
     if (!todayRoute) return;
     const shouldResume = searchParams.get('resumeVisit') === '1';
     if (!shouldResume) return;
@@ -325,6 +449,29 @@ export default function WorkerDashboard() {
     if (!sourceRoute) return;
 
     try {
+      if (!companyId) return;
+
+      // If it's already a concrete route for today, just assign/select it (avoid duplicating).
+      if (sourceRoute.date === today) {
+        await updateDoc(doc(db, 'companies', companyId, 'routes', sourceRoute.id), {
+          workerId: authUid,
+          status: sourceRoute.status || 'pending',
+        });
+        setTodayRoute(hydrateRouteProgress({ ...sourceRoute, workerId: authUid }));
+        toast.success(t('worker.toastRouteAssigned'));
+        return;
+      }
+
+      // If there is already an instance for today from this template, reuse it.
+      const existingTodayInstance = allMyRoutes.find(
+        (r) => r.date === today && (r.templateId === routeId || r.id === routeId)
+      );
+      if (existingTodayInstance) {
+        setTodayRoute(hydrateRouteProgress(existingTodayInstance));
+        toast.info(t('worker.toastDayResumed'));
+        return;
+      }
+
       // Create a NEW instance for today instead of modifying the template
       const newRouteInstance = {
         ...sourceRoute,
@@ -337,7 +484,6 @@ export default function WorkerDashboard() {
       };
       delete (newRouteInstance as any).id; // Remove template ID
 
-      if (!companyId) return;
       await addDoc(collection(db, 'companies', companyId, 'routes'), newRouteInstance);
       toast.success(t('worker.toastRouteAssigned'));
     } catch (e) {
@@ -350,6 +496,22 @@ export default function WorkerDashboard() {
     
     try {
       if ((todayRoute as any).isVirtual) {
+        if (!companyId) return;
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const existingTodayInstance = allMyRoutes.find(
+          (r) => r.date === today && (r.templateId === todayRoute.id || r.id === todayRoute.id)
+        );
+        if (existingTodayInstance) {
+          await updateDoc(doc(db, 'companies', companyId, 'routes', existingTodayInstance.id), {
+            status: 'in-progress',
+            startTime: existingTodayInstance.startTime || new Date().toISOString(),
+            workerId: authUid,
+          });
+          setTodayRoute(hydrateRouteProgress({ ...existingTodayInstance, status: 'in-progress' }));
+          toast.info(t('worker.toastDayResumed'));
+          return;
+        }
+
         // Instantiate the weekly/scheduled route for today
         const newInstance = removeUndefinedFields({
           ...todayRoute,
@@ -363,10 +525,11 @@ export default function WorkerDashboard() {
         delete (newInstance as any).id;
         delete (newInstance as any).isVirtual;
 
-        if (!companyId) return;
         await addDoc(collection(db, 'companies', companyId, 'routes'), newInstance);
         toast.success(t('worker.toastDayStartedNew'));
       } else {
+        setTodayRoute((prev) => (prev ? { ...prev, status: 'in-progress' } : prev));
+        persistRouteProgress({ ...todayRoute, status: 'in-progress' });
         if (!companyId) return;
         await updateDoc(doc(db, 'companies', companyId, 'routes', todayRoute.id), { 
           status: 'in-progress',
@@ -384,6 +547,9 @@ export default function WorkerDashboard() {
   const handleEndDay = async () => {
     if (!todayRoute || !authUid) return;
     if (!companyId) return;
+    const completedSnapshot: Route = { ...todayRoute, status: 'completed' };
+    persistRouteProgress(completedSnapshot);
+    setTodayRoute((prev) => (prev ? { ...prev, status: 'completed' } : prev));
     await updateDoc(doc(db, 'companies', companyId, 'routes', todayRoute.id), { 
       status: 'completed',
       endTime: new Date().toISOString(),
@@ -403,6 +569,35 @@ export default function WorkerDashboard() {
     setActivePoolIndex(index);
     setVisitStatus('arrived');
     toast.success(t('worker.toastArrival'));
+  };
+
+  const handleResumeService = (index: number) => {
+    setActivePoolIndex(index);
+    setVisitStatus('arrived');
+    setIncidenceMode(false);
+    toast.info(t('worker.resumeService'));
+  };
+
+  const handleCloseActivePool = () => {
+    setVisitStatus('idle');
+    setActivePoolIndex(null);
+    setIncidenceMode(false);
+    setNotes('');
+    setNotifyClient(true);
+  };
+
+  const handleGoToRouteSelection = () => {
+    setTodayRoute(null);
+    setActivePoolIndex(null);
+    setVisitStatus('idle');
+    setIncidenceMode(false);
+    setNotes('');
+    setNotifyClient(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('resumeVisit');
+    next.delete('routeId');
+    next.delete('poolId');
+    setSearchParams(next, { replace: true });
   };
 
   const handleFinish = async (status: 'ok' | 'issue') => {
@@ -429,7 +624,24 @@ export default function WorkerDashboard() {
       if (!currentCompleted.includes(poolId)) {
         const newCompleted = [...currentCompleted, poolId];
         const isAllDone = newCompleted.length === todayRoute.poolIds.length;
-        
+        setTodayRoute((prev) =>
+          prev
+            ? {
+                ...prev,
+                completedPools: newCompleted,
+                status: isAllDone ? 'completed' : 'in-progress',
+                lastPoolId: poolId,
+                lastStatus: status,
+              }
+            : prev
+        );
+        persistRouteProgress({
+          id: todayRoute.id,
+          templateId: todayRoute.templateId,
+          status: isAllDone ? 'completed' : 'in-progress',
+          completedPools: newCompleted,
+        });
+
         await updateDoc(doc(db, 'companies', companyId, 'routes', todayRoute.id), {
           completedPools: newCompleted,
           status: isAllDone ? 'completed' : 'in-progress',
@@ -469,6 +681,15 @@ export default function WorkerDashboard() {
 
   if (!user) return <div className="p-12 text-center text-red-500 font-bold">{t('common.userNotFound')}</div>;
 
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const assignedTodayRoutes = allMyRoutes
+    .filter((r) => isRouteActiveToday(r, todayStr))
+    .sort((a, b) => {
+      const statusDiff = statusRank[b.status] - statusRank[a.status];
+      if (statusDiff !== 0) return statusDiff;
+      return getIsoTime(b.startTime) - getIsoTime(a.startTime);
+    });
+
   if (!todayRoute) {
     return (
       <div className="space-y-6">
@@ -490,6 +711,12 @@ export default function WorkerDashboard() {
                     <div>
                       <h4 className="font-bold text-slate-900 text-lg">{route.routeName || t('worker.unnamedRoute')}</h4>
                       <p className="text-sm text-slate-500">{t('worker.poolsInRoute', { count: route.poolIds.length })}</p>
+                      <p className="text-xs font-bold text-blue-700">
+                        {t('worker.routeProgress', {
+                          done: route.completedPools?.length || 0,
+                          total: route.poolIds.length,
+                        })}
+                      </p>
                     </div>
                   </div>
                   <Button onClick={() => handlePickRoute(route.id)} className="gap-2">
@@ -504,8 +731,30 @@ export default function WorkerDashboard() {
             <div className="bg-slate-100 p-6 rounded-full mb-6">
               <Clock className="w-12 h-12 text-slate-400" />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">{t('worker.noRouteToday')}</h2>
-            {hasOtherRoutes ? (
+            <h2 className="text-xl font-bold text-slate-900 mb-2">
+              {assignedTodayRoutes.length > 0 ? t('worker.availableRoutes') : t('worker.noRouteToday')}
+            </h2>
+            {assignedTodayRoutes.length > 0 ? (
+              <div className="space-y-2 w-full max-w-md text-left">
+                {assignedTodayRoutes.map((r) => (
+                  <div key={r.id} className="p-3 bg-white border rounded-lg text-sm flex justify-between items-center shadow-sm">
+                    <div>
+                      <div className="font-bold text-slate-900">{r.routeName || t('worker.routeFallback')}</div>
+                      <div className="text-xs text-slate-500">
+                        {r.date || r.startDate || t('worker.noDate')} • {t('worker.poolsCountShort', { count: r.poolIds.length })}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => setTodayRoute(hydrateRouteProgress(r))}
+                      className="h-8 px-3 text-xs"
+                    >
+                      {t('worker.continueDay')}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : hasOtherRoutes ? (
               <div className="space-y-4 w-full max-w-md">
                 <p className="text-slate-500">{t('worker.otherDaysHint', { date: format(new Date(), 'dd/MM/yyyy') })}</p>
                 <Button variant="outline" onClick={() => setShowAllRoutes(!showAllRoutes)} className="w-full">
@@ -513,11 +762,13 @@ export default function WorkerDashboard() {
                 </Button>
                 {showAllRoutes && (
                   <div className="grid gap-2 text-left">
-                    {allMyRoutes.filter(r => r.date !== format(new Date(), 'yyyy-MM-dd')).map(r => (
+                    {allMyRoutes.map(r => (
                       <div key={r.id} className="p-3 bg-white border rounded-lg text-sm flex justify-between items-center shadow-sm">
                         <div>
                           <div className="font-bold text-slate-900">{r.routeName || t('worker.routeFallback')}</div>
-                          <div className="text-xs text-slate-500">{r.date || t('worker.noDate')} • {t('worker.poolsCountShort', { count: r.poolIds.length })}</div>
+                          <div className="text-xs text-slate-500">
+                            {r.date || r.startDate || t('worker.noDate')} • {t('worker.poolsCountShort', { count: r.poolIds.length })}
+                          </div>
                         </div>
                         <Button size="sm" onClick={() => handlePickRoute(r.id)} className="h-8 px-3 text-xs">{t('worker.bringToToday')}</Button>
                       </div>
@@ -570,9 +821,21 @@ export default function WorkerDashboard() {
     <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
       <div className="space-y-6">
         <header className="flex items-center justify-between">
-          <div>
+          <div className="flex items-start gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-11 w-11 p-0 rounded-xl"
+              onClick={handleGoToRouteSelection}
+              aria-label={t('common.back', { defaultValue: 'Back' })}
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div>
             <h2 className="text-2xl font-black text-slate-900">{t('worker.myRoute')}</h2>
             <p className="text-slate-500">{format(new Date(), i18n.language?.startsWith('en') ? 'EEEE, MMMM d, yyyy' : "EEEE, d 'de' MMMM", { locale: dateLocale })}</p>
+            </div>
           </div>
           <div className="flex gap-2">
             {todayRoute.status === 'pending' && (
@@ -659,14 +922,27 @@ export default function WorkerDashboard() {
                       {pool.address}
                     </div>
                   </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => openInMaps(pool.address)}
-                    className="h-10 w-10 p-0 rounded-full"
-                  >
-                    <Navigation className="w-5 h-5 text-blue-600" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {isActive && visitStatus === 'arrived' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCloseActivePool}
+                        className="h-10 w-10 p-0 rounded-full"
+                        aria-label={t('common.close')}
+                      >
+                        <X className="w-5 h-5 text-slate-600" />
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => openInMaps(pool.address)}
+                      className="h-10 w-10 p-0 rounded-full"
+                    >
+                      <Navigation className="w-5 h-5 text-blue-600" />
+                    </Button>
+                  </div>
                 </div>
 
                 <AnimatePresence mode="wait">
@@ -677,9 +953,19 @@ export default function WorkerDashboard() {
                       exit={{ opacity: 0, y: -10 }}
                     >
                       {isCompleted ? (
-                        <div className="w-full h-12 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center gap-2 text-emerald-600 font-bold">
-                          <CheckCircle2 className="w-5 h-5" />
-                          {t('worker.serviceCompleted')}
+                        <div className="space-y-2">
+                          <div className="w-full h-12 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center gap-2 text-emerald-600 font-bold">
+                            <CheckCircle2 className="w-5 h-5" />
+                            {t('worker.serviceCompleted')}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full h-11 font-bold"
+                            onClick={() => handleResumeService(index)}
+                          >
+                            {t('worker.resumeService')}
+                          </Button>
                         </div>
                       ) : (
                         <Button 

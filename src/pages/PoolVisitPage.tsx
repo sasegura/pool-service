@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { serverTimestamp } from 'firebase/firestore';
 import { useTranslation } from 'react-i18next';
@@ -98,6 +98,7 @@ export default function PoolVisitPage() {
   const [loadingPool, setLoadingPool] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showFilterPumpObservations, setShowFilterPumpObservations] = useState(false);
 
   const [chemistry, setChemistry] = useState<PoolChemistryInput>({ ...traditionalKitDefaults });
   const [chemistryDraft, setChemistryDraft] = useState<ChemistryInputDraft>(() =>
@@ -109,6 +110,7 @@ export default function PoolVisitPage() {
   const [notes, setNotes] = useState('');
   const [appliedTreatment, setAppliedTreatment] = useState('');
   const [photoUrlInput, setPhotoUrlInput] = useState('');
+  const quickSelectRefs = useRef<Partial<Record<keyof PoolChemistryInput, HTMLSelectElement | null>>>({});
 
   useEffect(() => {
     if (!poolId || !companyId) {
@@ -218,6 +220,17 @@ export default function PoolVisitPage() {
     setChemistry((c) => ({ ...c, [key]: num }));
   };
 
+  const openQuickSelector = (key: keyof PoolChemistryInput) => {
+    const selectEl = quickSelectRefs.current[key];
+    if (!selectEl) return;
+    selectEl.focus();
+    if (typeof selectEl.showPicker === 'function') {
+      selectEl.showPicker();
+      return;
+    }
+    selectEl.click();
+  };
+
   const handleSave = async () => {
     if (!poolId || !user || !pool || !companyId) return;
     setSaving(true);
@@ -289,6 +302,18 @@ export default function PoolVisitPage() {
     }
   };
 
+  const handleBackToRoute = () => {
+    if (!poolId) {
+      navigate(-1);
+      return;
+    }
+    const query = new URLSearchParams();
+    query.set('resumeVisit', '1');
+    query.set('poolId', poolId);
+    if (routeId) query.set('routeId', routeId);
+    navigate(`/?${query.toString()}`);
+  };
+
   if (authLoading || !companyId || loadingPool) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-500">
@@ -305,7 +330,7 @@ export default function PoolVisitPage() {
   return (
     <div className="space-y-4 pb-24">
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" size="sm" className="h-11 w-11 p-0 rounded-xl" onClick={() => navigate(-1)}>
+        <Button type="button" variant="outline" size="sm" className="h-11 w-11 p-0 rounded-xl" onClick={handleBackToRoute}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -332,7 +357,7 @@ export default function PoolVisitPage() {
           <p className="text-xs text-slate-500 mb-3">
             {t('poolVisit.quickMode', { defaultValue: 'Modo rapido: rellena solo lo necesario.' })}
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             {([
               ['ph', t('poolVisit.fieldPh'), t('routesPage.selectPlaceholder', { defaultValue: 'Seleccionar…' })],
               [
@@ -341,14 +366,21 @@ export default function PoolVisitPage() {
                 t('routesPage.selectPlaceholder', { defaultValue: 'Seleccionar…' }),
               ],
             ] as const).map(([key, label, hint]) => (
-              <label key={key} className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">{label}</span>
+              <label
+                key={key}
+                className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 min-h-[84px] justify-center cursor-pointer"
+                onClick={() => openQuickSelector(key)}
+              >
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-wide">{label}</span>
                 {(() => {
                   const config = chemistryFieldConfig[key];
                   const values = buildSelectorValues(config);
                   return (
                     <select
-                      className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
+                      ref={(el) => {
+                        quickSelectRefs.current[key] = el;
+                      }}
+                      className="w-full rounded-xl border-slate-200 bg-slate-50 px-3 py-3 text-lg font-black min-h-[52px]"
                       value={chemistryDraft[key] ?? (chemistry[key] != null ? String(chemistry[key]) : '')}
                       onChange={(e) => handleNumber(key, e.target.value)}
                     >
@@ -408,14 +440,17 @@ export default function PoolVisitPage() {
                 ['cyanuricAcidPpm', t('poolVisit.fieldCya'), '30-50'],
                   ['waterTempC', t('poolVisit.fieldTemp'), 'C'],
               ] as const).map(([key, label, hint]) => (
-                <label key={key} className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">{label}</span>
+                <label
+                  key={key}
+                  className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 min-h-[84px] justify-center"
+                >
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wide">{label}</span>
                   {(() => {
                     const config = chemistryFieldConfig[key];
                     const values = buildSelectorValues(config);
                     return (
                       <select
-                        className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
+                        className="w-full rounded-xl border-slate-200 bg-slate-50 px-3 py-3 text-lg font-black min-h-[52px]"
                         value={chemistryDraft[key] ?? (chemistry[key] != null ? String(chemistry[key]) : '')}
                         onChange={(e) => handleNumber(key, e.target.value)}
                       >
@@ -478,7 +513,18 @@ export default function PoolVisitPage() {
             {t('poolVisit.bottomDebris')}
           </button>
 
-          {showAdvanced && (
+          <button
+            type="button"
+            onClick={() => setShowFilterPumpObservations((s) => !s)}
+            className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white text-slate-700 font-bold text-sm inline-flex items-center justify-center gap-2"
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            {showFilterPumpObservations
+              ? t('poolVisit.hideFilterPumpObs', { defaultValue: 'Ocultar observaciones filtro-bomba' })
+              : t('poolVisit.showFilterPumpObs', { defaultValue: 'Observaciones filtro-bomba' })}
+          </button>
+
+          {showFilterPumpObservations && (
             <>
               <div>
                 <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">{t('poolVisit.filterPressure')}</p>
