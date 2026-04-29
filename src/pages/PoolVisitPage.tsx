@@ -20,6 +20,16 @@ import { PoolStatusBadge } from '../components/PoolStatusBadge';
 import type { PoolChemistryInput, PoolRecord, PoolVisualObservations } from '../types/pool';
 
 const emptyChem: PoolChemistryInput = {};
+const traditionalKitDefaults: PoolChemistryInput = {
+  ph: 7.4,
+  freeChlorinePpm: 2,
+  waterTempC: 26,
+  totalChlorinePpm: 2,
+  totalAlkalinityPpm: 100,
+  calciumHardnessPpm: 300,
+  cyanuricAcidPpm: 40,
+  salinityPpm: 3000,
+};
 const emptyVisual: PoolVisualObservations = {
   waterClarity: 'clear',
   algaeVisible: false,
@@ -29,6 +39,52 @@ const emptyVisual: PoolVisualObservations = {
 };
 
 type ChemistryInputDraft = Partial<Record<keyof PoolChemistryInput, string>>;
+type ChemistryFieldConfig = {
+  step?: number;
+  selectorMin?: number;
+  selectorMax?: number;
+  selectorValues?: number[];
+};
+
+const chemistryFieldConfig: Partial<Record<keyof PoolChemistryInput, ChemistryFieldConfig>> = {
+  ph: { step: 0.1, selectorMin: 6.8, selectorMax: 7.8 },
+  // Valores de comparador tradicionales (OTO/DPD) para seleccionar rapido
+  freeChlorinePpm: { selectorValues: [0, 0.5, 1, 1.5, 2, 3, 5] },
+  // Menos opciones para elegir rápido (por rangos)
+  waterTempC: { step: 2, selectorMin: 18, selectorMax: 34 },
+  salinityPpm: { step: 100, selectorMin: 2500, selectorMax: 3800 },
+  totalChlorinePpm: { selectorValues: [0, 0.5, 1, 1.5, 2, 3, 5] },
+  totalAlkalinityPpm: { step: 10, selectorMin: 60, selectorMax: 160 },
+  calciumHardnessPpm: { step: 25, selectorMin: 150, selectorMax: 500 },
+  cyanuricAcidPpm: { step: 5, selectorMin: 20, selectorMax: 80 },
+};
+
+const getStepDecimals = (step: number) => {
+  const stepString = String(step);
+  const decimals = stepString.includes('.') ? stepString.split('.')[1].length : 0;
+  return decimals;
+};
+
+const buildRangeValues = (config?: ChemistryFieldConfig) => {
+  if (!config) return [];
+  if (config.selectorValues?.length) {
+    return config.selectorValues.map((value) => String(value));
+  }
+  if (!config.step || config.selectorMin == null || config.selectorMax == null) return [];
+  const decimals = getStepDecimals(config.step);
+  const values: string[] = [];
+  for (let raw = config.selectorMin; raw <= config.selectorMax + config.step / 2; raw += config.step) {
+    values.push(String(Number(raw.toFixed(decimals))));
+  }
+  return values;
+};
+
+const buildSelectorValues = (config?: ChemistryFieldConfig) => {
+  const values = buildRangeValues(config);
+  // Si viene de un rango (min/max), quitamos el primer valor numérico para que el selector empiece “más útil”.
+  if (!config?.selectorValues?.length) return values.slice(1);
+  return values;
+};
 
 export default function PoolVisitPage() {
   const { poolId } = useParams<{ poolId: string }>();
@@ -43,8 +99,12 @@ export default function PoolVisitPage() {
   const [saving, setSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const [chemistry, setChemistry] = useState<PoolChemistryInput>({});
-  const [chemistryDraft, setChemistryDraft] = useState<ChemistryInputDraft>({});
+  const [chemistry, setChemistry] = useState<PoolChemistryInput>({ ...traditionalKitDefaults });
+  const [chemistryDraft, setChemistryDraft] = useState<ChemistryInputDraft>(() =>
+    Object.fromEntries(
+      Object.entries(traditionalKitDefaults).map(([k, v]) => [k, String(v)])
+    ) as ChemistryInputDraft
+  );
   const [visual, setVisual] = useState<PoolVisualObservations>(emptyVisual);
   const [notes, setNotes] = useState('');
   const [appliedTreatment, setAppliedTreatment] = useState('');
@@ -78,12 +138,16 @@ export default function PoolVisitPage() {
         const fallbackChem = (poolData.lastMeasurement || {}) as PoolChemistryInput;
         const restoredChem = ((bestMatch?.chemistry as PoolChemistryInput | undefined) || fallbackChem) as PoolChemistryInput;
         if (Object.keys(restoredChem).length > 0) {
-          setChemistry((prev) => ({ ...restoredChem, ...prev }));
+          const filteredEntries = Object.entries(restoredChem).filter(([, v]) => v != null && v !== '');
+          const filteredChem = Object.fromEntries(filteredEntries) as Partial<PoolChemistryInput>;
+          const filteredDraft = Object.fromEntries(
+            filteredEntries.map(([k, v]) => [k, String(v)])
+          ) as ChemistryInputDraft;
+
+          setChemistry((prev) => ({ ...prev, ...filteredChem }));
           setChemistryDraft((prev) => ({
-            ...Object.fromEntries(
-              Object.entries(restoredChem).map(([k, v]) => [k, v != null ? String(v) : ''])
-            ),
             ...prev,
+            ...filteredDraft,
           }));
         }
 
@@ -270,31 +334,56 @@ export default function PoolVisitPage() {
           </p>
           <div className="grid grid-cols-2 gap-3">
             {([
-              ['ph', t('poolVisit.fieldPh'), '7.2-7.6'],
-              ['freeChlorinePpm', t('poolVisit.fieldFc'), '1-3 ppm'],
-              ['waterTempC', t('poolVisit.fieldTemp'), 'C'],
+              ['ph', t('poolVisit.fieldPh'), t('routesPage.selectPlaceholder', { defaultValue: 'Seleccionar…' })],
+              [
+                'freeChlorinePpm',
+                t('poolVisit.fieldFc'),
+                t('routesPage.selectPlaceholder', { defaultValue: 'Seleccionar…' }),
+              ],
             ] as const).map(([key, label, hint]) => (
               <label key={key} className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">{label}</span>
-                <input
-                  inputMode="decimal"
-                  className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
-                  placeholder={hint}
-                  value={chemistryDraft[key] ?? (chemistry[key] != null ? String(chemistry[key]) : '')}
-                  onChange={(e) => handleNumber(key, e.target.value)}
-                />
+                {(() => {
+                  const config = chemistryFieldConfig[key];
+                  const values = buildSelectorValues(config);
+                  return (
+                    <select
+                      className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
+                      value={chemistryDraft[key] ?? (chemistry[key] != null ? String(chemistry[key]) : '')}
+                      onChange={(e) => handleNumber(key, e.target.value)}
+                    >
+                      <option value="">{hint}</option>
+                      {values.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </label>
             ))}
             {pool.poolSystemType === 'salt' && (
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">{t('poolVisit.fieldSalt')}</span>
-                <input
-                  inputMode="decimal"
-                  className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
-                  placeholder="2700-3400"
-                  value={chemistryDraft.salinityPpm ?? (chemistry.salinityPpm != null ? String(chemistry.salinityPpm) : '')}
-                  onChange={(e) => handleNumber('salinityPpm', e.target.value)}
-                />
+                {(() => {
+                  const config = chemistryFieldConfig.salinityPpm;
+                  const values = buildSelectorValues(config);
+                  return (
+                    <select
+                      className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
+                      value={chemistryDraft.salinityPpm ?? (chemistry.salinityPpm != null ? String(chemistry.salinityPpm) : '')}
+                      onChange={(e) => handleNumber('salinityPpm', e.target.value)}
+                    >
+                      <option value="">2700-3400</option>
+                      {values.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </label>
             )}
           </div>
@@ -317,16 +406,28 @@ export default function PoolVisitPage() {
                 ['totalAlkalinityPpm', t('poolVisit.fieldAlk'), '80-120'],
                 ['calciumHardnessPpm', t('poolVisit.fieldHard'), '200-400'],
                 ['cyanuricAcidPpm', t('poolVisit.fieldCya'), '30-50'],
+                  ['waterTempC', t('poolVisit.fieldTemp'), 'C'],
               ] as const).map(([key, label, hint]) => (
                 <label key={key} className="flex flex-col gap-1">
                   <span className="text-[10px] font-bold text-slate-500 uppercase">{label}</span>
-                  <input
-                    inputMode="decimal"
-                    className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
-                    placeholder={hint}
-                    value={chemistryDraft[key] ?? (chemistry[key] != null ? String(chemistry[key]) : '')}
-                    onChange={(e) => handleNumber(key, e.target.value)}
-                  />
+                  {(() => {
+                    const config = chemistryFieldConfig[key];
+                    const values = buildSelectorValues(config);
+                    return (
+                      <select
+                        className="rounded-xl border-slate-200 p-3 text-lg font-bold min-h-[48px]"
+                        value={chemistryDraft[key] ?? (chemistry[key] != null ? String(chemistry[key]) : '')}
+                        onChange={(e) => handleNumber(key, e.target.value)}
+                      >
+                        <option value="">{hint}</option>
+                        {values.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </label>
               ))}
             </div>

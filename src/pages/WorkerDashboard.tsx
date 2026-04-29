@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, Timestamp, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -115,6 +115,7 @@ function WorkerRouteMap({
 export default function WorkerDashboard() {
   const { user, loading: authLoading, companyId } = useAuth();
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const authUid = auth.currentUser?.uid ?? user?.uid;
   /** Rutas antiguas usan `user.uid` (p. ej. demo-worker-id); las nuevas usan el UID real de Auth. */
@@ -201,9 +202,10 @@ export default function WorkerDashboard() {
       
       // 1. Find a specific daily instance for today (prioridad de planificación si hay varias)
       const dailyInstances = allRoutes.filter(r => isMyWorkerRoute(r.workerId) && r.date === today);
-      const dailyInstance = dailyInstances.sort(
+      const prioritizedDailyInstances = dailyInstances.sort(
         (a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0)
-      )[0];
+      );
+      const dailyInstance = prioritizedDailyInstances.find((r) => r.status !== 'completed');
       
       if (dailyInstance) {
         setTodayRoute(dailyInstance);
@@ -388,6 +390,13 @@ export default function WorkerDashboard() {
       workerId: authUid
     });
     toast.success(t('worker.toastDayFinished'));
+    setTodayRoute(null);
+    setActivePoolIndex(null);
+    setVisitStatus('idle');
+    setIncidenceMode(false);
+    setNotes('');
+    setNotifyClient(true);
+    navigate('/');
   };
 
   const handleArrive = (index: number) => {
