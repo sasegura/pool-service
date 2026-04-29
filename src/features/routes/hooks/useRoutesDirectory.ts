@@ -1,23 +1,23 @@
 import { useEffect, useState } from 'react';
+import { useAppServices } from '../../../app/providers/AppServicesContext';
 import type { RouteDocument, RoutesPool, RoutesWorker } from '../types';
 import { subscribeRoutesDirectory } from '../application/subscribeRoutesDirectory';
-import { createRoutesDirectoryRepositoryFirestore } from '../repositories/routesDirectoryRepositoryFirestore';
 
 export function useRoutesDirectory(enabled: boolean, companyId: string | undefined) {
+  void companyId;
   const [pools, setPools] = useState<RoutesPool[]>([]);
   const [workers, setWorkers] = useState<RoutesWorker[]>([]);
   const [routes, setRoutes] = useState<RouteDocument[]>([]);
+  const { routesRepository } = useAppServices();
 
   useEffect(() => {
-    if (!enabled || !companyId) return;
-
-    const repository = createRoutesDirectoryRepositoryFirestore(companyId);
-    return subscribeRoutesDirectory(repository, {
+    if (!enabled || !routesRepository) return;
+    return subscribeRoutesDirectory(routesRepository, {
       onPools: setPools,
       onWorkers: setWorkers,
       onRoutes: setRoutes,
     });
-  }, [enabled, companyId]);
+  }, [enabled, routesRepository]);
 
   return { pools, workers, routes };
 }

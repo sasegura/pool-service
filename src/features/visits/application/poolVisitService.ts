@@ -1,4 +1,9 @@
-import type { PoolVisitRepository } from '../ports';
+import type {
+  PoolUpdatePayload,
+  PoolVisitRepository,
+  VisitDocument,
+  VisitPayload,
+} from '../ports';
 
 export async function loadPoolVisitContext(
   repository: PoolVisitRepository,
@@ -8,7 +13,7 @@ export async function loadPoolVisitContext(
   }
 ) {
   const pool = await repository.fetchPoolById(input.poolId);
-  if (!pool) return { pool: null, recentVisits: [] as Record<string, unknown>[] };
+  if (!pool) return { pool: null, recentVisits: [] as VisitDocument[] };
   const recentVisits = await repository.fetchRecentVisitDocs(input.poolId, input.maxRecentDocs ?? 5);
   return { pool, recentVisits };
 }
@@ -17,8 +22,8 @@ export function createPoolVisitCommands(repository: PoolVisitRepository) {
   return {
     savePoolVisitWithPoolUpdate: (
       poolId: string,
-      visitPayload: Record<string, unknown>,
-      buildPoolUpdate: (visitDocId: string) => Record<string, unknown>
+      visitPayload: VisitPayload,
+      buildPoolUpdate: (visitDocId: string) => PoolUpdatePayload
     ) => repository.savePoolVisitWithPoolUpdate(poolId, visitPayload, buildPoolUpdate),
   };
 }

@@ -4,15 +4,16 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Button, Card } from '../components/ui/Common';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppServices } from '../app/providers/AppServicesContext';
 import { auth } from '../lib/firebase';
 import { acceptInvite } from '../features/tenant/application/acceptInvite';
-import { createInviteAcceptanceRepositoryFirestore } from '../features/tenant/repositories/inviteAcceptanceRepositoryFirestore';
 
 export default function AcceptInvitePage() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { refreshClaims } = useAuth();
+  const { inviteAcceptanceRepository } = useAppServices();
   const [busy, setBusy] = useState(false);
 
   const params = useMemo(
@@ -36,7 +37,7 @@ export default function AcceptInvitePage() {
     }
     setBusy(true);
     try {
-      await acceptInvite(createInviteAcceptanceRepositoryFirestore(), {
+      await acceptInvite(inviteAcceptanceRepository, {
         companyId: params.companyId,
         memberId: params.memberId,
         uid: u.uid,

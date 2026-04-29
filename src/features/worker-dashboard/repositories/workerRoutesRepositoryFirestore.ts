@@ -1,7 +1,7 @@
 import { addDoc, collection, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { PoolRecord } from '../../../types/pool';
-import type { QuerySnapshot, DocumentData } from 'firebase/firestore';
+import type { RouteDocument as Route } from '../../routes/types';
 import type { WorkerRoutesRepository } from '../ports';
 
 export function createWorkerRoutesRepositoryFirestore(companyId: string): WorkerRoutesRepository {
@@ -35,20 +35,28 @@ export function createWorkerRoutesRepositoryFirestore(companyId: string): Worker
 
 export function subscribeAllRoutes(
   companyId: string,
-  onNext: (snapshot: QuerySnapshot<DocumentData>) => void,
+  onNext: (routes: Route[]) => void,
   onError?: (e: unknown) => void
 ) {
-  return onSnapshot(collection(db, 'companies', companyId, 'routes'), onNext, onError);
+  return onSnapshot(
+    collection(db, 'companies', companyId, 'routes'),
+    (snapshot) => onNext(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as Route)),
+    onError
+  );
 }
 
 export function subscribeAllPools(
   companyId: string,
-  onNext: (snapshot: QuerySnapshot<DocumentData>) => void,
+  onNext: (pools: PoolRecord[]) => void,
   onError?: (e: unknown) => void
 ) {
-  return onSnapshot(collection(db, 'companies', companyId, 'pools'), onNext, onError);
+  return onSnapshot(
+    collection(db, 'companies', companyId, 'pools'),
+    (snapshot) => onNext(snapshot.docs.map((d) => poolDocToRecord(d.id, d.data()))),
+    onError
+  );
 }
 
-export function poolDocToRecord(id: string, data: DocumentData): PoolRecord {
+export function poolDocToRecord(id: string, data: { [key: string]: unknown }): PoolRecord {
   return { id, ...data } as PoolRecord;
 }

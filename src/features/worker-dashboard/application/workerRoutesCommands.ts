@@ -1,4 +1,8 @@
-import type { WorkerRoutesRepository } from '../ports';
+import type {
+  WorkerLogWriteInput,
+  WorkerRoutesRepository,
+  WorkerRouteWriteInput,
+} from '../ports';
 
 export function createWorkerRoutesCommands(repository: WorkerRoutesRepository) {
   return {
@@ -7,9 +11,9 @@ export function createWorkerRoutesCommands(repository: WorkerRoutesRepository) {
       location: { lat: number; lng: number },
       updatedAtIso: string
     ) => repository.updateMemberLocation(authUid, location, updatedAtIso),
-    updateRoute: (routeId: string, data: Record<string, unknown>) =>
+    updateRoute: (routeId: string, data: WorkerRouteWriteInput) =>
       repository.updateRoute(routeId, data),
-    createRoute: (data: Record<string, unknown>) => repository.createRoute(data),
-    createLog: (data: Record<string, unknown>) => repository.createLog(data),
+    createRoute: (data: WorkerRouteWriteInput) => repository.createRoute(data),
+    createLog: (data: WorkerLogWriteInput) => repository.createLog(data),
   };
 }

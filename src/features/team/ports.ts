@@ -1,7 +1,7 @@
-import type { Unsubscribe } from 'firebase/firestore';
 import type { TeamUser } from './types';
 
 export type TeamUsersSubscriber = (users: TeamUser[]) => void;
+export type UnsubscribeFn = () => void;
 
 export type CreatePreregisteredUserResult = {
   id: string;
@@ -10,7 +10,7 @@ export type CreatePreregisteredUserResult = {
 };
 
 export interface TeamRepository {
-  subscribeUsers(onNext: TeamUsersSubscriber, onError?: (e: unknown) => void): Unsubscribe;
+  subscribeUsers(onNext: TeamUsersSubscriber, onError?: (e: unknown) => void): UnsubscribeFn;
   updateUser(id: string, data: { name: string; email: string; role: string }): Promise<void>;
   /**
    * Creates a `members` row: technicians as `active` + Firebase Auth (callable); clients as `invited` (accept-invite link).

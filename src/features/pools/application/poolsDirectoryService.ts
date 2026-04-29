@@ -1,4 +1,4 @@
-import type { PoolsDirectoryRepository } from '../ports';
+import type { PoolWriteInput, PoolsDirectoryRepository } from '../ports';
 
 export function subscribePoolsDirectory(
   repository: PoolsDirectoryRepository,
@@ -19,8 +19,8 @@ export function subscribePoolsDirectory(
 
 export function createPoolsDirectoryCommands(repository: PoolsDirectoryRepository) {
   return {
-    createPool: (data: Record<string, unknown>) => repository.createPool(data),
-    updatePool: (id: string, data: Record<string, unknown>) => repository.updatePool(id, data),
+    createPool: (data: PoolWriteInput) => repository.createPool(data),
+    updatePool: (id: string, data: PoolWriteInput) => repository.updatePool(id, data),
     deletePool: (id: string) => repository.deletePool(id),
     updatePoolOwner: (poolId: string, clientId: string | undefined) =>
       repository.updatePoolOwner(poolId, clientId),

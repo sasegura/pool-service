@@ -33,15 +33,14 @@ import { enUS, es } from 'date-fns/locale';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { optimizeRoute } from '../services/geminiService';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppServices } from '../app/providers/AppServicesContext';
 import { useTranslation } from 'react-i18next';
 import { getGoogleMapsApiKey } from '../config/env';
 import { MIAMI_CENTER } from '../features/routes/constants';
 import { DeferredMapMount } from '../features/routes/components/DeferredMapMount';
 import { resolveRouteNameForSave } from '../features/routes/domain/routeNaming';
 import { defaultNewRouteForm, isDatedRoute, isLegacyUndated } from '../features/routes/domain/routePredicates';
-import { createRoutesCommands } from '../features/routes/application/routesCommands';
 import { useRoutesDirectory } from '../features/routes/hooks/useRoutesDirectory';
-import { createRoutesDirectoryRepositoryFirestore } from '../features/routes/repositories/routesDirectoryRepositoryFirestore';
 import type { RouteDocument as Route, RoutesPool as Pool, RoutesWorker as Worker } from '../features/routes/types';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
@@ -55,11 +54,8 @@ export default function RoutesPage() {
   const weekdayInitials = t('routesPage.weekdayInitials', { returnObjects: true }) as string[];
   const calendarWeekdayHeaders = t('routesPage.calendarWeekdays', { returnObjects: true }) as string[];
   const { user, loading: authLoading, companyId } = useAuth();
+  const { routesCommands } = useAppServices();
   const { pools, workers, routes } = useRoutesDirectory(!authLoading && !!user && !!companyId, companyId ?? undefined);
-  const routesCommands = useMemo(
-    () => (companyId ? createRoutesCommands(createRoutesDirectoryRepositoryFirestore(companyId)) : null),
-    [companyId]
-  );
   const [showRouteForm, setShowRouteForm] = useState(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppServices } from '../app/providers/AppServicesContext';
 import { Button, Card } from '../components/ui/Common';
 import { PoolStatusBadge } from '../components/PoolStatusBadge';
 import { estimateVolumeM3, computeAvgDepthM } from '../lib/poolVolume';
@@ -10,12 +11,12 @@ import { format, parseISO } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
 import type { PoolRecord, PoolVisitRecord } from '../types/pool';
 import { subscribePoolDetail } from '../features/pools/application/subscribePoolDetail';
-import { createPoolDetailRepositoryFirestore } from '../features/pools/repositories/poolDetailRepositoryFirestore';
 
 export default function PoolDetailPage() {
   const { poolId } = useParams<{ poolId: string }>();
   const navigate = useNavigate();
   const { companyId } = useAuth();
+  const { poolDetailRepository } = useAppServices();
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.startsWith('en') ? enUS : es;
 
@@ -24,9 +25,8 @@ export default function PoolDetailPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!poolId || !companyId) return;
-    const repository = createPoolDetailRepositoryFirestore(companyId);
-    return subscribePoolDetail(repository, {
+    if (!poolId || !companyId || !poolDetailRepository) return;
+    return subscribePoolDetail(poolDetailRepository, {
       poolId,
       maxVisits: 24,
       onPool: (nextPool) => {
@@ -38,7 +38,7 @@ export default function PoolDetailPage() {
       },
       onError: () => setLoading(false),
     });
-  }, [poolId, companyId]);
+  }, [poolId, companyId, poolDetailRepository]);
 
   const computedVolume = useMemo(() => {
     if (!pool) return undefined;

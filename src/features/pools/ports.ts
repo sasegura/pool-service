@@ -1,4 +1,3 @@
-import type { Unsubscribe } from 'firebase/firestore';
 import type { PoolRecord } from '../../types/pool';
 
 export interface ClientDirectoryEntry {
@@ -9,12 +8,14 @@ export interface ClientDirectoryEntry {
 
 export type PoolsSubscriber = (pools: PoolRecord[]) => void;
 export type ClientUsersSubscriber = (users: ClientDirectoryEntry[]) => void;
+export type UnsubscribeFn = () => void;
+export type PoolWriteInput = { [key: string]: unknown };
 
 export interface PoolsDirectoryRepository {
-  subscribePools(onNext: PoolsSubscriber, onError?: (e: unknown) => void): Unsubscribe;
-  subscribeClientUsers(onNext: ClientUsersSubscriber, onError?: (e: unknown) => void): Unsubscribe;
-  createPool(data: Record<string, unknown>): Promise<string>;
-  updatePool(id: string, data: Record<string, unknown>): Promise<void>;
+  subscribePools(onNext: PoolsSubscriber, onError?: (e: unknown) => void): UnsubscribeFn;
+  subscribeClientUsers(onNext: ClientUsersSubscriber, onError?: (e: unknown) => void): UnsubscribeFn;
+  createPool(data: PoolWriteInput): Promise<string>;
+  updatePool(id: string, data: PoolWriteInput): Promise<void>;
   deletePool(id: string): Promise<void>;
   updatePoolOwner(poolId: string, clientId: string | undefined): Promise<void>;
 }

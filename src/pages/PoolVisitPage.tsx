@@ -1,16 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { serverTimestamp } from 'firebase/firestore';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { ArrowLeft, Droplets, Loader2, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppServices } from '../app/providers/AppServicesContext';
 import { deepRemoveUndefined } from '../features/pools/domain/poolDraft';
 import {
-  createPoolVisitRepositoryFirestore,
-} from '../features/visits/repositories/poolVisitRepositoryFirestore';
-import {
-  createPoolVisitCommands,
   loadPoolVisitContext,
 } from '../features/visits/application/poolVisitService';
 import { Button, Card } from '../components/ui/Common';
@@ -95,6 +91,7 @@ export default function PoolVisitPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { user, loading: authLoading, companyId } = useAuth();
+  const { poolVisitRepository, poolVisitCommands } = useAppServices();
 
   const [pool, setPool] = useState<PoolRecord | null>(null);
   const [loadingPool, setLoadingPool] = useState(true);
@@ -115,16 +112,15 @@ export default function PoolVisitPage() {
   const quickSelectRefs = useRef<Partial<Record<keyof PoolChemistryInput, HTMLSelectElement | null>>>({});
 
   useEffect(() => {
-    if (!poolId || !companyId) {
+    if (!poolId || !poolVisitRepository) {
       setLoadingPool(false);
       return;
     }
-    const repository = createPoolVisitRepositoryFirestore(companyId);
     let cancelled = false;
     (async () => {
       setLoadingPool(true);
       try {
-        const { pool: poolData, recentVisits } = await loadPoolVisitContext(repository, {
+        const { pool: poolData, recentVisits } = await loadPoolVisitContext(poolVisitRepository, {
           poolId,
           maxRecentDocs: 5,
         });
@@ -174,7 +170,7 @@ export default function PoolVisitPage() {
     return () => {
       cancelled = true;
     };
-  }, [poolId, routeId, user?.uid, companyId]);
+  }, [poolId, routeId, user?.uid, poolVisitRepository]);
 
   const effectiveVolume = useMemo(() => {
     if (!pool) return 50;
@@ -235,9 +231,7 @@ export default function PoolVisitPage() {
   };
 
   const handleSave = async () => {
-    if (!poolId || !user || !pool || !companyId) return;
-    const repository = createPoolVisitRepositoryFirestore(companyId);
-    const commands = createPoolVisitCommands(repository);
+    if (!poolId || !user || !pool || !poolVisitCommands) return;
     setSaving(true);
     try {
       const visitedAt = new Date().toISOString();
@@ -273,13 +267,13 @@ export default function PoolVisitPage() {
         photoUrls,
         recommendations,
         healthStatus: health,
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
       }) as Record<string, unknown>;
 
       const nextMaint = new Date(visitedAt);
       nextMaint.setDate(nextMaint.getDate() + DEFAULT_MAINTENANCE_INTERVAL_DAYS);
 
-      await commands.savePoolVisitWithPoolUpdate(poolId, visitPayload, (visitDocId) =>
+      await poolVisitCommands.savePoolVisitWithPoolUpdate(poolId, visitPayload, (visitDocId) =>
         deepRemoveUndefined({
           healthStatus: health,
           lastVisitAt: visitedAt,
@@ -287,7 +281,7 @@ export default function PoolVisitPage() {
           lastMeasurement: chemistryPayload,
           lastVisitId: visitDocId,
           nextRecommendedMaintenance: nextMaint.toISOString(),
-          updatedAt: serverTimestamp(),
+          updatedAt: new Date().toISOString(),
         }) as Record<string, unknown>
       );
 

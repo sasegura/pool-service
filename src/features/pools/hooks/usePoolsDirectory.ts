@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAppServices } from '../../../app/providers/AppServicesContext';
 import type { PoolRecord } from '../../../types/pool';
 import type { ClientDirectoryEntry } from '../ports';
 import {
@@ -6,16 +7,12 @@ import {
   subscribePoolsDirectory,
   type PoolsDirectoryCommands,
 } from '../application/poolsDirectoryService';
-import { createPoolsDirectoryRepositoryFirestore } from '../repositories/poolsDirectoryRepositoryFirestore';
 
 export function usePoolsDirectory(enabled: boolean, companyId: string | undefined) {
+  void companyId;
   const [pools, setPools] = useState<PoolRecord[]>([]);
   const [clients, setClients] = useState<ClientDirectoryEntry[]>([]);
-
-  const repository = useMemo(
-    () => (companyId ? createPoolsDirectoryRepositoryFirestore(companyId) : null),
-    [companyId]
-  );
+  const { poolsRepository: repository } = useAppServices();
 
   const commands = useMemo(
     () => (repository ? createPoolsDirectoryCommands(repository) : null),

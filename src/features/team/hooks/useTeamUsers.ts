@@ -1,19 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAppServices } from '../../../app/providers/AppServicesContext';
 import {
   createTeamCommands,
   subscribeTeamUsers,
   type TeamCommands,
 } from '../application/teamUsersService';
-import { createTeamRepositoryFirestore } from '../repositories/teamRepositoryFirestore';
 import type { TeamUser } from '../types';
 
 export function useTeamUsers(enabled: boolean, companyId: string | undefined) {
+  void companyId;
   const [allUsers, setAllUsers] = useState<TeamUser[]>([]);
-
-  const repository = useMemo(
-    () => (companyId ? createTeamRepositoryFirestore(companyId) : null),
-    [companyId]
-  );
+  const { teamRepository: repository } = useAppServices();
 
   const commands = useMemo(
     () => (repository ? createTeamCommands(repository) : null),

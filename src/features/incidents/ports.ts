@@ -1,18 +1,19 @@
-import type { Unsubscribe } from 'firebase/firestore';
 import type { ServiceIncidentLog } from './types';
+
+export type UnsubscribeFn = () => void;
 
 export interface IncidentsRepository {
   subscribePoolNames(
     onNext: (map: Record<string, string>) => void,
     onError?: (e: unknown) => void
-  ): Unsubscribe;
+  ): UnsubscribeFn;
   subscribeWorkerNames(
     onNext: (map: Record<string, string>) => void,
     onError?: (e: unknown) => void
-  ): Unsubscribe;
+  ): UnsubscribeFn;
   subscribeIssueIncidents(
     filterDate: string,
     onNext: (incidents: ServiceIncidentLog[]) => void,
     onError?: (e: unknown) => void
-  ): Unsubscribe;
+  ): UnsubscribeFn;
 }

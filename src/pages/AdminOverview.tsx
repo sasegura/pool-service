@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppServices } from '../app/providers/AppServicesContext';
 import { useTranslation } from 'react-i18next';
 import { getGoogleMapsApiKey } from '../config/env';
 import {
@@ -15,8 +16,6 @@ import {
   type AdminOverviewRoute as Route,
   type AdminOverviewWorkerUser as User,
 } from '../features/admin-overview/hooks/useAdminOverviewData';
-import { createRoutesCommands } from '../features/routes/application/routesCommands';
-import { createRoutesDirectoryRepositoryFirestore } from '../features/routes/repositories/routesDirectoryRepositoryFirestore';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -60,10 +59,7 @@ export default function AdminOverview() {
   } = useAdminOverviewData(selectedDate, !loading && !!user, companyId ?? undefined);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ workerId: '', date: '' });
-  const routesCommands = useMemo(
-    () => (companyId ? createRoutesCommands(createRoutesDirectoryRepositoryFirestore(companyId)) : null),
-    [companyId]
-  );
+  const { routesCommands } = useAppServices();
 
   const handleStartEdit = (route: Route) => {
     setEditingRouteId(route.id);

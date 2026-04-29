@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Timestamp, serverTimestamp } from 'firebase/firestore';
 import { auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppServices } from '../app/providers/AppServicesContext';
 import { useTranslation } from 'react-i18next';
 import { Button, Card } from '../components/ui/Common';
 import { cn } from '../lib/utils';
@@ -13,11 +13,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { getGoogleMapsApiKey } from '../config/env';
-import {
-  createWorkerRoutesRepositoryFirestore,
-  poolDocToRecord,
-} from '../features/worker-dashboard/repositories/workerRoutesRepositoryFirestore';
-import { createWorkerRoutesCommands } from '../features/worker-dashboard/application/workerRoutesCommands';
+import { resolveWorkerDashboardState } from '../features/worker-dashboard/application/resolveWorkerDashboardState';
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const MIAMI_CENTER = { lat: 25.7617, lng: -80.1918 };
@@ -135,14 +131,7 @@ export default function WorkerDashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const authUid = auth.currentUser?.uid ?? user?.uid;
-  const workerRoutesRepository = React.useMemo(
-    () => (companyId ? createWorkerRoutesRepositoryFirestore(companyId) : null),
-    [companyId]
-  );
-  const workerRoutesCommands = React.useMemo(
-    () => (workerRoutesRepository ? createWorkerRoutesCommands(workerRoutesRepository) : null),
-    [workerRoutesRepository]
-  );
+  const { workerRoutesRepository, workerRoutesCommands } = useAppServices();
   /** Rutas antiguas usan `user.uid` (p. ej. demo-worker-id); las nuevas usan el UID real de Auth. */
   const normalizeOwnerId = (value?: string | null) => (value || '').trim().toLowerCase();
 
@@ -279,90 +268,17 @@ export default function WorkerDashboard() {
     
     // Listen for ALL routes to handle templates, weekly plans and daily instances
     if (!workerRoutesRepository) return;
-    const unsubRoutes = workerRoutesRepository.subscribeAllRoutes(async (snapshot) => {
-      const allRoutes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Route));
-      setAllMyRoutes(allRoutes.filter(r => isMyWorkerRoute(r.workerId)));
-      
-      // 1. Find a specific daily instance for today (prioridad de planificación si hay varias)
-      const dailyInstances = allRoutes.filter(r => isMyWorkerRoute(r.workerId) && r.date === today);
-      const activeDailyInstances = dailyInstances.filter((r) => r.status !== 'completed');
-      const completedDailyInstances = dailyInstances.filter((r) => r.status === 'completed');
-
-      const sortByCurrentPriority = (a: Route, b: Route) => {
-        const statusDiff = statusRank[b.status] - statusRank[a.status];
-        if (statusDiff !== 0) return statusDiff;
-        const startDiff = getIsoTime(b.startTime) - getIsoTime(a.startTime);
-        if (startDiff !== 0) return startDiff;
-        return (a.planningPriority ?? 0) - (b.planningPriority ?? 0);
-      };
-
-      const sortByCompletedPriority = (a: Route, b: Route) => {
-        const completedDiff = (b.completedPools?.length || 0) - (a.completedPools?.length || 0);
-        if (completedDiff !== 0) return completedDiff;
-        const timeDiff = getIsoTime(b.endTime) - getIsoTime(a.endTime);
-        if (timeDiff !== 0) return timeDiff;
-        return (a.planningPriority ?? 0) - (b.planningPriority ?? 0);
-      };
-
-      const dailyInstance =
-        [...activeDailyInstances].sort(sortByCurrentPriority)[0] ||
-        [...completedDailyInstances].sort(sortByCompletedPriority)[0];
-
-      if (dailyInstance) {
-        // Mantener la instancia real del día (incluso si está completada)
-        // para conservar piscinas terminadas y estado al recargar.
-        setTodayRoute(hydrateRouteProgress(dailyInstance));
-      } else {
-        // 2. Look for a weekly/scheduled assignment
-        const assignedRoute = allRoutes.find(r => isMyWorkerRoute(r.workerId) && isRouteActiveToday(r, today));
-        if (assignedRoute) {
-          // Virtual route: needs instantiation
-          setTodayRoute(hydrateRouteProgress({
-            ...assignedRoute,
-            status: 'pending',
-            completedPools: [],
-            date: today,
-            isVirtual: true
-          } as any));
-        } else {
-          setTodayRoute(null);
-        }
-      }
-
-      // 3. Available routes (templates or unassigned for today) with real progress if a daily instance exists
-      const dailyByTemplateId = new globalThis.Map<string, Route>();
-      dailyInstances.forEach((instance) => {
-        const templateId = instance.templateId;
-        if (!templateId) return;
-        const current = dailyByTemplateId.get(templateId);
-        if (!current) {
-          dailyByTemplateId.set(templateId, instance);
-          return;
-        }
-        const currentScore = current.completedPools?.length || 0;
-        const nextScore = instance.completedPools?.length || 0;
-        if (nextScore >= currentScore) dailyByTemplateId.set(templateId, instance);
-      });
-
-      const available = allRoutes
-        .filter((r) => {
-          const isTemplate = !r.date && !r.startDate && !r.assignedDay;
-          const isUnassignedToday = r.date === today && !r.workerId;
-          return (isTemplate || isUnassignedToday) && (!r.workerId || isMyWorkerRoute(r.workerId));
-        })
-        .map((route) => {
-          const linkedDaily = dailyByTemplateId.get(route.id);
-          if (!linkedDaily) return hydrateRouteProgress(route);
-          const hydratedDaily = hydrateRouteProgress(linkedDaily);
-          return {
-            ...route,
-            status: hydratedDaily.status,
-            completedPools: hydratedDaily.completedPools,
-          } as Route;
-        });
-      setAvailableRoutes(available);
-      
-      setHasOtherRoutes(allRoutes.some(r => isMyWorkerRoute(r.workerId)));
+    const unsubRoutes = workerRoutesRepository.subscribeAllRoutes(async (allRoutes) => {
+      const resolved = resolveWorkerDashboardState(
+        allRoutes as any,
+        today,
+        isMyWorkerRoute,
+        (route) => hydrateRouteProgress(route as Route) as any
+      );
+      setAllMyRoutes(resolved.allMyRoutes as Route[]);
+      setTodayRoute((resolved.todayRoute as Route | null) ?? null);
+      setAvailableRoutes(resolved.availableRoutes as Route[]);
+      setHasOtherRoutes(resolved.hasOtherRoutes);
       setLoading(false);
     }, (error) => {
       console.error("Error fetching routes:", error);
@@ -370,10 +286,10 @@ export default function WorkerDashboard() {
     });
 
     // Listen for all pools to have them ready
-    const unsubPools = workerRoutesRepository.subscribeAllPools((snap) => {
+    const unsubPools = workerRoutesRepository.subscribeAllPools((allPools) => {
       const poolMap: Record<string, PoolRecord> = {};
-      snap.docs.forEach(d => {
-        poolMap[d.id] = poolDocToRecord(d.id, d.data());
+      allPools.forEach((pool) => {
+        poolMap[pool.id] = pool;
       });
       setPools(poolMap);
     }, (error) => {
@@ -489,7 +405,7 @@ export default function WorkerDashboard() {
         status: 'pending',
         completedPools: [],
         templateId: routeId,
-        createdAt: serverTimestamp()
+        createdAt: new Date().toISOString()
       };
       delete (newRouteInstance as any).id; // Remove template ID
 
@@ -529,7 +445,7 @@ export default function WorkerDashboard() {
           startTime: new Date().toISOString(),
           completedPools: [],
           templateId: todayRoute.id,
-          createdAt: serverTimestamp()
+          createdAt: new Date().toISOString()
         });
         delete (newInstance as any).id;
         delete (newInstance as any).isVirtual;
@@ -618,8 +534,8 @@ export default function WorkerDashboard() {
       const logPayload = removeUndefinedFields({
         workerId: authUid,
         poolId,
-        arrivalTime: Timestamp.now(), // Simplified for demo
-        departureTime: Timestamp.now(),
+        arrivalTime: new Date().toISOString(),
+        departureTime: new Date().toISOString(),
         status,
         notes: status === 'issue' ? notes : '',
         notifyClient: status === 'issue' ? notifyClient : true,

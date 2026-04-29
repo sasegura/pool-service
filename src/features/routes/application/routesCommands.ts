@@ -1,9 +1,9 @@
-import type { RoutesDirectoryRepository } from '../ports';
+import type { RouteWriteInput, RoutesDirectoryRepository } from '../ports';
 
 export function createRoutesCommands(repository: RoutesDirectoryRepository) {
   return {
-    createRoute: (data: Record<string, unknown>) => repository.createRoute(data),
-    updateRoute: (routeId: string, data: Record<string, unknown>) =>
+    createRoute: (data: RouteWriteInput) => repository.createRoute(data),
+    updateRoute: (routeId: string, data: RouteWriteInput) =>
       repository.updateRoute(routeId, data),
     deleteRoute: (routeId: string) => repository.deleteRoute(routeId),
     updateRouteWorker: (routeId: string, workerId: string) =>
@@ -12,7 +12,7 @@ export function createRoutesCommands(repository: RoutesDirectoryRepository) {
       first: { routeId: string; planningPriority: number },
       second: { routeId: string; planningPriority: number }
     ) => repository.swapPlanningPriority(first, second),
-    createPlannedInstances: (instances: Record<string, unknown>[]) =>
+    createPlannedInstances: (instances: RouteWriteInput[]) =>
       repository.createPlannedInstances(instances),
   };
 }

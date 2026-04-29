@@ -1,7 +1,12 @@
 import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, updateDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { PoolRecord } from '../../../types/pool';
-import type { PoolVisitRepository } from '../ports';
+import type {
+  PoolUpdatePayload,
+  PoolVisitRepository,
+  VisitDocument,
+  VisitPayload,
+} from '../ports';
 
 export function createPoolVisitRepositoryFirestore(companyId: string): PoolVisitRepository {
   return {
@@ -27,7 +32,7 @@ export async function fetchRecentVisitDocs(
   companyId: string,
   poolId: string,
   maxDocs: number
-): Promise<Record<string, unknown>[]> {
+): Promise<VisitDocument[]> {
   const visitsSnap = await getDocs(
     query(
       collection(db, 'companies', companyId, 'pools', poolId, 'visits'),
@@ -35,14 +40,14 @@ export async function fetchRecentVisitDocs(
       limit(maxDocs)
     )
   );
-  return visitsSnap.docs.map((d) => d.data() as Record<string, unknown>);
+  return visitsSnap.docs.map((d) => d.data() as VisitDocument);
 }
 
 export async function savePoolVisitWithPoolUpdate(
   companyId: string,
   poolId: string,
-  visitPayload: Record<string, unknown>,
-  buildPoolUpdate: (visitDocId: string) => Record<string, unknown>
+  visitPayload: VisitPayload,
+  buildPoolUpdate: (visitDocId: string) => PoolUpdatePayload
 ): Promise<string> {
   const visitRef = await addDoc(
     collection(db, 'companies', companyId, 'pools', poolId, 'visits'),
