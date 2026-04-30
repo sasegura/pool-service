@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import CompanyOnboarding from '../../features/tenant/components/CompanyOnboarding';
 import AdminOverview from '../../pages/AdminOverview';
@@ -15,8 +16,21 @@ export function DashboardSwitcher() {
     demoDashboardView,
   } = useAuth();
   const { t } = useTranslation();
+  const isResolvingRole =
+    !loading &&
+    !tenantError &&
+    !needsCompanyOnboarding &&
+    !isDemoCompany &&
+    membershipRole === null;
 
-  if (loading) return <div className="p-8 text-center">{t('app.loading')}</div>;
+  if (loading || isResolvingRole) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-600">
+        <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+        <p className="text-sm font-medium">{t('app.loading')}</p>
+      </div>
+    );
+  }
   if (tenantError) {
     return (
       <div className="p-8 text-center text-red-600 max-w-md mx-auto">

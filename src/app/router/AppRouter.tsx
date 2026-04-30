@@ -47,6 +47,22 @@ export function AppRouter() {
               }
             />
             <Route
+              path="wateroptions/:poolId"
+              element={
+                <ProtectedRoute membershipRoles={['admin', 'supervisor', 'technician']}>
+                  <PoolVisitPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="route/:idRuta"
+              element={
+                <ProtectedRoute membershipRoles={['technician']}>
+                  <DashboardSwitcher />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="routes"
               element={
                 <ProtectedRoute membershipRoles={['admin', 'supervisor']}>

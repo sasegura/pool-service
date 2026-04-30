@@ -290,7 +290,11 @@ export default function PoolVisitPage() {
       query.set('resumeVisit', '1');
       query.set('poolId', poolId);
       if (routeId) query.set('routeId', routeId);
-      navigate(`/?${query.toString()}`);
+      if (routeId) {
+        navigate(`/route/${encodeURIComponent(routeId)}?${query.toString()}`);
+      } else {
+        navigate(`/?${query.toString()}`);
+      }
     } catch (e: any) {
       console.error('Error saving pool visit:', e);
       toast.error(t('poolVisit.toastError'), {
@@ -310,7 +314,11 @@ export default function PoolVisitPage() {
     query.set('resumeVisit', '1');
     query.set('poolId', poolId);
     if (routeId) query.set('routeId', routeId);
-    navigate(`/?${query.toString()}`);
+    if (routeId) {
+      navigate(`/route/${encodeURIComponent(routeId)}?${query.toString()}`);
+    } else {
+      navigate(`/?${query.toString()}`);
+    }
   };
 
   if (authLoading || !companyId || loadingPool) {
@@ -336,20 +344,12 @@ export default function PoolVisitPage() {
           <h1 className="text-xl font-black text-slate-900 truncate">{t('poolVisit.title')}</h1>
           <p className="text-sm text-slate-500 truncate flex items-center gap-1">
             <Droplets className="w-4 h-4 shrink-0 text-blue-500" />
-            {pool.name}
+            {pool.name} {effectiveVolume.toFixed(1)} m3
           </p>
         </div>
         <PoolStatusBadge status={previewHealth} />
       </div>
-
-      <Card className="p-4 bg-slate-50 border-slate-200">
-        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">{t('poolVisit.volumeHint')}</p>
-        <p className="text-sm text-slate-800">
-          <span className="font-black">{effectiveVolume.toFixed(1)} m3</span>
-          <span className="text-slate-500"> - {t('poolVisit.volumeSub')}</span>
-        </p>
-      </Card>
-
+          
       <section>
         <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{t('poolVisit.sectionChemistry')}</h2>
         <Card className="p-4">
@@ -367,7 +367,7 @@ export default function PoolVisitPage() {
             ] as const).map(([key, label, hint]) => (
               <label
                 key={key}
-                className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 min-h-[84px] justify-center cursor-pointer"
+                className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 min-h-[86px] justify-center cursor-pointer"
                 onClick={() => openQuickSelector(key)}
               >
                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-wide">{label}</span>
@@ -441,7 +441,7 @@ export default function PoolVisitPage() {
               ] as const).map(([key, label, hint]) => (
                 <label
                   key={key}
-                  className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 min-h-[84px] justify-center"
+                  className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 min-h-[76px] justify-center"
                 >
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-wide">{label}</span>
                   {(() => {
@@ -472,45 +472,38 @@ export default function PoolVisitPage() {
       <section>
         <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{t('poolVisit.sectionVisual')}</h2>
         <Card className="p-4 space-y-4">
-          <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">{t('poolVisit.waterClarity')}</p>
-            <div className="grid grid-cols-3 gap-2">
-              {(['clear', 'slightly_cloudy', 'cloudy'] as const).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setVisual((s) => ({ ...s, waterClarity: v }))}
-                  className={`min-h-[48px] rounded-xl border px-2 font-bold text-xs transition ${
-                    visual.waterClarity === v ? 'border-blue-600 bg-blue-50 text-blue-900' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  {t(`poolVisit.clarity.${v}`)}
-                </button>
-              ))}
+          <div className="flex items-end gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">{t('poolVisit.waterClarity')}</p>
+              <select
+                className="w-full rounded-xl border-slate-200 bg-slate-50 px-3 py-3 text-lg font-black min-h-[52px]"
+                value={visual.waterClarity}
+                onChange={(e) =>
+                  setVisual((s) => ({
+                    ...s,
+                    waterClarity: e.target.value as 'clear' | 'slightly_cloudy' | 'cloudy',
+                  }))
+                }
+              >
+                {(['clear', 'slightly_cloudy', 'cloudy'] as const).map((v) => (
+                  <option key={v} value={v}>
+                    {t(`poolVisit.clarity.${v}`)}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setVisual((s) => ({ ...s, algaeVisible: !s.algaeVisible }))}
+              className={`min-h-[52px] rounded-xl border px-4 text-left font-bold text-sm whitespace-nowrap ${
+                visual.algaeVisible ? 'border-red-500 bg-red-50 text-red-900' : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            >
+              {visual.algaeVisible ? '✓ ' : ''}
+              {t('poolVisit.algae')}
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setVisual((s) => ({ ...s, algaeVisible: !s.algaeVisible }))}
-            className={`min-h-[48px] rounded-xl border px-4 text-left font-bold text-sm ${
-              visual.algaeVisible ? 'border-red-500 bg-red-50 text-red-900' : 'border-slate-200 bg-white text-slate-700'
-            }`}
-          >
-            {visual.algaeVisible ? '✓ ' : ''}
-            {t('poolVisit.algae')}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setVisual((s) => ({ ...s, bottomDebris: !s.bottomDebris }))}
-            className={`min-h-[48px] rounded-xl border px-4 text-left font-bold text-sm ${
-              visual.bottomDebris ? 'border-amber-500 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-700'
-            }`}
-          >
-            {visual.bottomDebris ? '✓ ' : ''}
-            {t('poolVisit.bottomDebris')}
-          </button>
 
           <button
             type="button"
@@ -566,6 +559,33 @@ export default function PoolVisitPage() {
       </section>
 
       <section>
+        <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{t('poolVisit.sectionRecs')}</h2>
+        <div className="space-y-2">
+          {previewRecs.length === 0 ? (
+            <Card className="p-4 text-sm text-slate-500">{t('poolVisit.noRecs')}</Card>
+          ) : (
+            previewRecs.slice(0, 3).map((r) => (
+              <Card key={r.id} className="p-4 border-l-4 border-l-blue-500">
+                <p className="font-black text-slate-900">{t(r.titleKey, { defaultValue: r.titleDefault })}</p>
+                {r.dose && r.dose.amount > 0 && (
+                  <p className="mt-1 text-sm font-bold text-blue-800">
+                    {t('poolVisit.doseLine', {
+                      amount: r.dose.amount,
+                      unit: r.dose.unit,
+                      product: t(r.dose.productKey, { defaultValue: r.dose.productDefault }),
+                    })}
+                  </p>
+                )}
+                {showAdvanced && r.bodyKey && (
+                  <p className="text-sm text-slate-600 mt-1">{t(r.bodyKey, { defaultValue: r.bodyDefault })}</p>
+                )}
+              </Card>
+            ))
+          )}
+        </div>
+      </section>
+
+      <section>
         <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{t('poolVisit.sectionNotes')}</h2>
         <Card className="p-4 space-y-3">
           <textarea
@@ -591,33 +611,6 @@ export default function PoolVisitPage() {
             </>
           )}
         </Card>
-      </section>
-
-      <section>
-        <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{t('poolVisit.sectionRecs')}</h2>
-        <div className="space-y-2">
-          {previewRecs.length === 0 ? (
-            <Card className="p-4 text-sm text-slate-500">{t('poolVisit.noRecs')}</Card>
-          ) : (
-            previewRecs.slice(0, 3).map((r) => (
-              <Card key={r.id} className="p-4 border-l-4 border-l-blue-500">
-                <p className="font-black text-slate-900">{t(r.titleKey, { defaultValue: r.titleDefault })}</p>
-                {r.dose && r.dose.amount > 0 && (
-                  <p className="mt-1 text-sm font-bold text-blue-800">
-                    {t('poolVisit.doseLine', {
-                      amount: r.dose.amount,
-                      unit: r.dose.unit,
-                      product: t(r.dose.productKey, { defaultValue: r.dose.productDefault }),
-                    })}
-                  </p>
-                )}
-                {showAdvanced && r.bodyKey && (
-                  <p className="text-sm text-slate-600 mt-1">{t(r.bodyKey, { defaultValue: r.bodyDefault })}</p>
-                )}
-              </Card>
-            ))
-          )}
-        </div>
       </section>
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur border-t border-slate-200 max-w-4xl mx-auto">

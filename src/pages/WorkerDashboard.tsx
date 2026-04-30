@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -63,6 +63,8 @@ const getIsoTime = (value?: string) => {
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? 0 : ms;
 };
+
+const startOfIsoDay = (value: string) => startOfDay(parseISO(value));
 
 function WorkerRouteMap({
   poolIds,
@@ -128,6 +130,7 @@ function WorkerRouteMap({
 }
 
 export default function WorkerDashboard() {
+  const { idRuta } = useParams<{ idRuta?: string }>();
   const { user, loading: authLoading, companyId } = useAuth();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -264,6 +267,40 @@ export default function WorkerDashboard() {
     return false;
   };
 
+  const recurrenceLabelForRoute = (route: Route) => {
+    if (route.recurrence === 'daily') return t('worker.periodicityDaily');
+    if (route.recurrence === 'weekly') return t('worker.periodicityWeekly');
+    if (route.recurrence === 'bi-weekly') return t('worker.periodicityBiWeekly');
+    if (route.recurrence === 'monthly') return t('worker.periodicityMonthly');
+    return t('worker.periodicityOneOff');
+  };
+
+  const nextOccurrenceDate = (route: Route): string | null => {
+    const today = startOfDay(new Date());
+    if (route.date) {
+      const d = startOfIsoDay(route.date);
+      return d >= today ? format(d, 'yyyy-MM-dd') : null;
+    }
+    if (!route.startDate) return null;
+    if (!route.recurrence || route.recurrence === 'none') {
+      const d = startOfIsoDay(route.startDate);
+      return d >= today ? format(d, 'yyyy-MM-dd') : null;
+    }
+
+    for (let i = 0; i < 120; i++) {
+      const candidate = addDays(today, i);
+      const dateStr = format(candidate, 'yyyy-MM-dd');
+      if (isRouteActiveToday(route, dateStr)) return dateStr;
+    }
+    return null;
+  };
+
+  const routeTimingSubtitle = (route: Route) => {
+    const periodicity = recurrenceLabelForRoute(route);
+    const nextDate = nextOccurrenceDate(route);
+    return nextDate ? `${periodicity} • ${t('worker.nextDate', { date: nextDate })}` : periodicity;
+  };
+
   useEffect(() => {
     if (authLoading || !companyId) return;
 
@@ -387,6 +424,18 @@ export default function WorkerDashboard() {
     setSearchParams(next, { replace: true });
   }, [todayRoute, searchParams, setSearchParams]);
 
+  useEffect(() => {
+    if (!idRuta) return;
+    if (todayRoute?.id === idRuta || todayRoute?.templateId === idRuta) return;
+
+    const routeFromParam =
+      allMyRoutes.find((r) => r.id === idRuta || r.templateId === idRuta)
+      || availableRoutes.find((r) => r.id === idRuta);
+    if (!routeFromParam) return;
+
+    setTodayRoute(hydrateRouteProgress(routeFromParam as Route));
+  }, [idRuta, todayRoute?.id, todayRoute?.templateId, allMyRoutes, availableRoutes]);
+
   const handlePickRoute = async (routeId: string) => {
     if (!authUid) return;
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -403,6 +452,7 @@ export default function WorkerDashboard() {
           status: sourceRoute.status || 'pending',
         });
         setTodayRoute(hydrateRouteProgress({ ...sourceRoute, workerId: authUid }));
+        navigate(`/route/${encodeURIComponent(sourceRoute.id)}`);
         toast.success(t('worker.toastRouteAssigned'));
         return;
       }
@@ -413,6 +463,7 @@ export default function WorkerDashboard() {
       );
       if (existingTodayInstance) {
         setTodayRoute(hydrateRouteProgress(existingTodayInstance));
+        navigate(`/route/${encodeURIComponent(existingTodayInstance.id)}`);
         toast.info(t('worker.toastDayResumed'));
         return;
       }
@@ -430,6 +481,7 @@ export default function WorkerDashboard() {
       delete (newRouteInstance as any).id; // Remove template ID
 
       await workerRoutesCommands.createRoute(newRouteInstance);
+      navigate(`/route/${encodeURIComponent(routeId)}`);
       toast.success(t('worker.toastRouteAssigned'));
     } catch (e) {
       toast.error(t('worker.toastRouteAssignError'));
@@ -490,6 +542,9 @@ export default function WorkerDashboard() {
   };
 
   const handleContinueDayUiOnly = () => {
+    if (todayRoute?.id) {
+      navigate(`/route/${encodeURIComponent(todayRoute.id)}`);
+    }
     setTodayRoute((prev) => (prev ? { ...prev, status: 'in-progress' } : prev));
     setVisitStatus('idle');
     setActivePoolIndex(null);
@@ -552,6 +607,7 @@ export default function WorkerDashboard() {
     next.delete('routeId');
     next.delete('poolId');
     setSearchParams(next, { replace: true });
+    navigate('/');
   };
 
   const handleFinish = async (status: 'ok' | 'issue') => {
@@ -721,7 +777,7 @@ export default function WorkerDashboard() {
                         <div>
                           <div className="font-bold text-slate-900">{r.routeName || t('worker.routeFallback')}</div>
                           <div className="text-xs text-slate-500">
-                            {r.date || r.startDate || t('worker.noDate')} • {t('worker.poolsCountShort', { count: r.poolIds.length })}
+                            {routeTimingSubtitle(r)} • {t('worker.poolsCountShort', { count: r.poolIds.length })}
                           </div>
                         </div>
                         <Button size="sm" onClick={() => handlePickRoute(r.id)} className="h-8 px-3 text-xs">{t('worker.bringToToday')}</Button>
@@ -934,7 +990,7 @@ export default function WorkerDashboard() {
                     >
                       {!incidenceMode ? (
                         <div className="space-y-3">
-                          <Link to={`/pools/${poolId}/visit?routeId=${encodeURIComponent(todayRoute.id)}`} className="block">
+                          <Link to={`/wateroptions/${poolId}?routeId=${encodeURIComponent(todayRoute.id)}`} className="block">
                             <Button type="button" variant="outline" className="w-full min-h-[52px] text-base font-black gap-2">
                               <Droplets className="w-5 h-5 text-blue-600" />
                               {t('worker.waterMeasurement')}
