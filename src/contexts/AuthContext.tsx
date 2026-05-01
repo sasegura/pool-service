@@ -111,6 +111,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [tenantError, setTenantError] = useState<string | null>(null);
   const [isDemoCompany, setIsDemoCompany] = useState(false);
   const [demoDashboardView, setDemoDashboardViewState] = useState<DemoDashboardView>('admin');
+  /**
+   * After membership resolves `companyId`, we must wait for `companies/{id}` before choosing the dashboard;
+   * otherwise demo tenants briefly show admin (Firestore role) before `isDemoCompany` flips true.
+   */
+  const [companyDocSyncedForId, setCompanyDocSyncedForId] = useState<string | null>(null);
   const demoWorkspaceBootstrapLock = useRef(false);
 
   const setDemoDashboardView = useCallback((view: DemoDashboardView) => {
@@ -125,8 +130,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!companyId) {
       setIsDemoCompany(false);
+      setDemoDashboardViewState('admin');
+      setCompanyDocSyncedForId(null);
       return;
     }
+
     const ref = doc(db, 'companies', companyId);
     const unsub = onSnapshot(
       ref,
@@ -134,19 +142,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const data = snap.data();
         const v = data?.isAnonymousSandbox === true || data?.isDemoWorkspace === true;
         setIsDemoCompany(v);
+        if (v) {
+          setDemoDashboardViewState(readStoredDemoView());
+        } else {
+          setDemoDashboardViewState('admin');
+        }
+        setCompanyDocSyncedForId(companyId);
       },
-      () => setIsDemoCompany(false)
+      () => {
+        setIsDemoCompany(false);
+        setDemoDashboardViewState('admin');
+        setCompanyDocSyncedForId(companyId);
+      }
     );
     return () => unsub();
   }, [companyId]);
-
-  useEffect(() => {
-    if (isDemoCompany) {
-      setDemoDashboardViewState(readStoredDemoView());
-    } else {
-      setDemoDashboardViewState('admin');
-    }
-  }, [isDemoCompany]);
 
   const membershipQuery = useMemo(() => {
     if (!authUser) return null;
@@ -301,12 +311,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   }, [membershipRole]);
 
-  const loading = authLoading || (!!authUser && tenantLoading);
+  const awaitingCompanyDoc =
+    !!authUser && !!companyId && companyDocSyncedForId !== companyId;
 
-  const navRoleForUi: MembershipRole = useMemo(
-    () => (isDemoCompany ? demoDashboardViewToNavRole(demoDashboardView) : membershipRole),
-    [isDemoCompany, demoDashboardView, membershipRole]
-  );
+  const loading = authLoading || (!!authUser && tenantLoading) || awaitingCompanyDoc;
+
+  const navRoleForUi: MembershipRole = useMemo(() => {
+    if (awaitingCompanyDoc) return null;
+    return isDemoCompany ? demoDashboardViewToNavRole(demoDashboardView) : membershipRole;
+  }, [awaitingCompanyDoc, isDemoCompany, demoDashboardView, membershipRole]);
 
   const setRole = useCallback(() => {}, []);
 
