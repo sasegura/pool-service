@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import CompanyOnboarding from '../../features/tenant/components/CompanyOnboarding';
@@ -7,6 +8,9 @@ import ClientDashboard from '../../pages/ClientDashboard';
 import WorkerDashboard from '../../pages/WorkerDashboard';
 
 export function DashboardSwitcher() {
+  const { pathname } = useLocation();
+  const isTechnicianRoutePath = /^\/route\/[^/]+\/?$/.test(pathname);
+
   const {
     membershipRole,
     loading,
@@ -41,13 +45,14 @@ export function DashboardSwitcher() {
   }
   if (needsCompanyOnboarding) return <CompanyOnboarding />;
   if (isDemoCompany) {
+    if (isTechnicianRoutePath) return <WorkerDashboard />;
     if (demoDashboardView === 'client') return <ClientDashboard />;
     if (demoDashboardView === 'worker') return <WorkerDashboard />;
     return <AdminOverview />;
   }
 
   if (membershipRole === 'client') return <ClientDashboard />;
-  if (membershipRole === 'technician') return <WorkerDashboard />;
+  if (membershipRole === 'technician' || isTechnicianRoutePath) return <WorkerDashboard />;
   if (membershipRole === 'admin' || membershipRole === 'supervisor') return <AdminOverview />;
 
   return <div className="p-8 text-center text-red-500 font-bold">{t('common.roleUndefined')}</div>;
