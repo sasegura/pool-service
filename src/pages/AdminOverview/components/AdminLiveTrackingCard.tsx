@@ -16,7 +16,7 @@ export function AdminLiveTrackingCard({ apiKey, liveWorkers }: AdminLiveTracking
   const { t } = useTranslation();
 
   return (
-    <Card className="overflow-hidden border-slate-200">
+    <Card className="w-full min-w-0 overflow-hidden border-slate-200">
       <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
         <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
           <Navigation className="w-4 h-4 text-blue-600" /> {t('admin.mapRealtimeTitle')}

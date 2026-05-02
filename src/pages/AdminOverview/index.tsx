@@ -62,7 +62,7 @@ export default function AdminOverview() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full min-w-0">
       <AdminOverviewPageHeader selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} />
 
       <AdminOverviewStatGrid
@@ -72,27 +72,22 @@ export default function AdminOverview() {
         incidentsCount={incidentsCount}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <AdminRoutesStatusTable
-            selectedDate={selectedDate}
-            routes={routes}
-            logsForSelectedDate={logsForSelectedDate}
-            users={users}
-            allWorkers={allWorkers}
-            pools={pools}
-            editingRouteId={editingRouteId}
-            editData={editData}
-            onEditDataChange={setEditData}
-            onStartEdit={handleStartEdit}
-            onCancelEdit={() => setEditingRouteId(null)}
-            onSaveEdit={handleSaveEdit}
-          />
-        </div>
-
-        <div className="space-y-6">
-          {canUseMaps ? <AdminLiveTrackingCard apiKey={GOOGLE_MAPS_API_KEY} liveWorkers={liveWorkers} /> : null}
-        </div>
+      <div className="space-y-6 w-full min-w-0">
+        <AdminRoutesStatusTable
+          selectedDate={selectedDate}
+          routes={routes}
+          logsForSelectedDate={logsForSelectedDate}
+          users={users}
+          allWorkers={allWorkers}
+          pools={pools}
+          editingRouteId={editingRouteId}
+          editData={editData}
+          onEditDataChange={setEditData}
+          onStartEdit={handleStartEdit}
+          onCancelEdit={() => setEditingRouteId(null)}
+          onSaveEdit={handleSaveEdit}
+        />
+        {canUseMaps ? <AdminLiveTrackingCard apiKey={GOOGLE_MAPS_API_KEY} liveWorkers={liveWorkers} /> : null}
       </div>
     </div>
   );

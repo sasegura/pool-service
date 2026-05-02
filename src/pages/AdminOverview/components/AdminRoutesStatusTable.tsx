@@ -47,7 +47,7 @@ export function AdminRoutesStatusTable({
   const { t } = useTranslation();
 
   return (
-    <Card className="overflow-hidden border-slate-200">
+    <Card className="w-full min-w-0 overflow-hidden border-slate-200">
       <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
         <div>
           <h3 className="text-lg font-bold text-slate-900">{t('admin.routeStatus')}</h3>
