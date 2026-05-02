@@ -15,7 +15,8 @@ import { resolveWorkerDashboardState } from '../../features/worker-dashboard/app
 import type { PoolRecord } from '../../types/pool';
 import { GOOGLE_MAPS_API_KEY, MAPS_INTEGRATION_ENABLED } from './mapConfig';
 import type { WorkerRoute } from './types';
-import { hydrateRouteProgress, persistRouteProgress, statusRank } from './routeProgress';
+import { completedPoolIdsForRouteToday, type WorkerServiceLog } from './completedPoolsFromLogs';
+import { hydrateRouteProgress, normalizeRouteStatusByProgress, persistRouteProgress, statusRank } from './routeProgress';
 import { isRouteActiveToday, nextOccurrenceDate } from './routeScheduling';
 import { getIsoTime, removeUndefinedFields } from './misc';
 import { RouteLoadingView } from './components/RouteLoadingView';
@@ -63,6 +64,7 @@ export default function WorkerDashboard() {
   const [notifyClient, setNotifyClient] = useState(true);
   const [companyName, setCompanyName] = useState<string>('');
   const [isEndingDay, setIsEndingDay] = useState(false);
+  const [logsForToday, setLogsForToday] = useState<Record<string, unknown>[]>([]);
 
   const recurrenceLabelForRoute = (route: WorkerRoute) => {
     if (route.recurrence === 'daily') return t('worker.periodicityDaily');
@@ -138,6 +140,16 @@ export default function WorkerDashboard() {
       unsubPools();
     };
   }, [authLoading, authUid, user?.uid, companyId, workerRoutesRepository, idRuta]);
+
+  useEffect(() => {
+    if (authLoading || !companyId || !workerRoutesRepository) return;
+    const day = format(new Date(), 'yyyy-MM-dd');
+    return workerRoutesRepository.subscribeLogsForDate(
+      day,
+      (logs) => setLogsForToday(logs),
+      (err) => console.error('Worker logs subscription:', err)
+    );
+  }, [authLoading, companyId, workerRoutesRepository]);
 
   useEffect(() => {
     if (!MAPS_INTEGRATION_ENABLED) return;
@@ -233,6 +245,22 @@ export default function WorkerDashboard() {
     setTodayRoute(hydrateRouteProgress(routeFromParam as WorkerRoute));
   }, [idRuta, todayRoute?.id, todayRoute?.templateId, allMyRoutes, availableRoutes]);
 
+  const routeForUi = React.useMemo((): WorkerRoute | null => {
+    if (!todayRoute) return null;
+    const day = format(new Date(), 'yyyy-MM-dd');
+    const merged = completedPoolIdsForRouteToday(logsForToday as WorkerServiceLog[], todayRoute, day, authUid);
+    const status = normalizeRouteStatusByProgress(todayRoute.status, merged.length, todayRoute.poolIds.length);
+    return { ...todayRoute, completedPools: merged, status };
+  }, [todayRoute, logsForToday, authUid]);
+
+  const todayDoneCountForRoute = React.useCallback(
+    (r: WorkerRoute) => {
+      const day = format(new Date(), 'yyyy-MM-dd');
+      return completedPoolIdsForRouteToday(logsForToday as WorkerServiceLog[], r, day, authUid).length;
+    },
+    [logsForToday, authUid]
+  );
+
   const handlePickRoute = async (routeId: string) => {
     if (!authUid) return;
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -274,8 +302,15 @@ export default function WorkerDashboard() {
       };
       delete (newRouteInstance as any).id;
 
-      await workerRoutesCommands.createRoute(newRouteInstance);
-      navigate(`/route/${encodeURIComponent(routeId)}`);
+      const createdId = await workerRoutesCommands.createRoute(newRouteInstance);
+      const instance: WorkerRoute = {
+        ...(newRouteInstance as Omit<WorkerRoute, 'id'>),
+        id: createdId,
+        templateId: routeId,
+        date: today,
+      };
+      setTodayRoute(hydrateRouteProgress(instance));
+      navigate(`/route/${encodeURIComponent(createdId)}`);
       toast.success(t('worker.toastRouteAssigned'));
     } catch (e) {
       toast.error(t('worker.toastRouteAssignError'));
@@ -287,7 +322,7 @@ export default function WorkerDashboard() {
     const startedAt = new Date().toISOString();
 
     try {
-      if ((todayRoute as any).isVirtual) {
+      if (todayRoute.isVirtual) {
         if (!workerRoutesCommands) return;
         const today = format(new Date(), 'yyyy-MM-dd');
         const existingTodayInstance = allMyRoutes.find(
@@ -300,22 +335,15 @@ export default function WorkerDashboard() {
             workerId: authUid,
           });
           setTodayRoute(hydrateRouteProgress({ ...existingTodayInstance, status: 'in-progress' }));
+          navigate(`/route/${encodeURIComponent(existingTodayInstance.id)}`);
           toast.info(t('worker.toastDayResumed'));
           return;
         }
 
-        setTodayRoute((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: 'in-progress',
-                startTime: prev.startTime || startedAt,
-              }
-            : prev
-        );
         const newInstance = removeUndefinedFields({
           ...todayRoute,
           workerId: authUid,
+          date: today,
           status: 'in-progress',
           startTime: startedAt,
           completedPools: [],
@@ -325,7 +353,13 @@ export default function WorkerDashboard() {
         delete (newInstance as any).id;
         delete (newInstance as any).isVirtual;
 
-        await workerRoutesCommands.createRoute(newInstance);
+        const createdId = await workerRoutesCommands.createRoute(newInstance);
+        const instance: WorkerRoute = {
+          ...(newInstance as Omit<WorkerRoute, 'id'>),
+          id: createdId,
+        };
+        setTodayRoute(hydrateRouteProgress(instance));
+        navigate(`/route/${encodeURIComponent(createdId)}`);
         toast.success(t('worker.toastDayStartedNew'));
       } else {
         setTodayRoute((prev) => (prev ? { ...prev, status: 'in-progress' } : prev));
@@ -358,6 +392,10 @@ export default function WorkerDashboard() {
 
   const handleEndDay = async () => {
     if (!todayRoute || !authUid) return;
+    if (todayRoute.isVirtual) {
+      toast.error(t('worker.toastStartDayFirst'));
+      return;
+    }
     if (!workerRoutesCommands) return;
     setIsEndingDay(true);
     try {
@@ -422,19 +460,26 @@ export default function WorkerDashboard() {
 
   const handleFinish = async (status: 'ok' | 'issue') => {
     if (activePoolIndex === null || !todayRoute || !authUid) return;
+    if (todayRoute.isVirtual) {
+      toast.error(t('worker.toastStartDayFirst'));
+      return;
+    }
 
     const poolId = todayRoute.poolIds[activePoolIndex];
 
     try {
+      const calendarDay = format(new Date(), 'yyyy-MM-dd');
       const logPayload = removeUndefinedFields({
         workerId: authUid,
         poolId,
+        routeId: todayRoute.id,
+        templateId: todayRoute.templateId,
         arrivalTime: new Date().toISOString(),
         departureTime: new Date().toISOString(),
         status,
         notes: status === 'issue' ? notes : '',
         notifyClient: status === 'issue' ? notifyClient : true,
-        date: todayRoute.date,
+        date: calendarDay,
       });
       if (!workerRoutesCommands) return;
       await workerRoutesCommands.createLog(logPayload);
@@ -457,6 +502,7 @@ export default function WorkerDashboard() {
         persistRouteProgress({
           id: todayRoute.id,
           templateId: todayRoute.templateId,
+          date: todayRoute.date,
           status: isAllDone ? 'completed' : 'in-progress',
           completedPools: newCompleted,
         });
@@ -528,6 +574,7 @@ export default function WorkerDashboard() {
         t={t}
         availableRoutes={availableRoutes}
         assignedTodayRoutes={assignedTodayRoutes}
+        todayDoneCountForRoute={todayDoneCountForRoute}
         hasOtherRoutes={hasOtherRoutes}
         showAllRoutes={showAllRoutes}
         onToggleShowAllRoutes={() => setShowAllRoutes(!showAllRoutes)}
@@ -547,12 +594,15 @@ export default function WorkerDashboard() {
   const canUseMaps =
     MAPS_INTEGRATION_ENABLED && !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'MY_GOOGLE_MAPS_API_KEY';
 
+  const displayRoute = routeForUi ?? todayRoute;
+
   const content = (
     <div className="space-y-6">
       <ActiveRouteHeader
         dateLocale={dateLocale}
         datePattern={datePattern}
         todayRoute={todayRoute}
+        progressPoolIds={displayRoute.completedPools}
         onBack={handleGoToRouteSelection}
         backLabel={t('common.back', { defaultValue: 'Back' })}
         title={t('worker.myRoute')}
@@ -569,23 +619,23 @@ export default function WorkerDashboard() {
 
       {canUseMaps ? (
         <RouteMapCard
-          poolIds={todayRoute.poolIds}
+          poolIds={displayRoute.poolIds}
           pools={pools}
-          completedPoolIds={todayRoute.completedPools}
+          completedPoolIds={displayRoute.completedPools}
           progressTitle={t('worker.progress')}
           poolsProgressLabel={t('worker.poolsProgress', {
-            done: todayRoute.completedPools?.length || 0,
-            total: todayRoute.poolIds.length,
+            done: displayRoute.completedPools?.length || 0,
+            total: displayRoute.poolIds.length,
           })}
         />
       ) : null}
 
       <div className={cn('space-y-4 transition-opacity', isEndingDay && 'pointer-events-none opacity-50')}>
-        {todayRoute.poolIds.map((poolId, index) => {
+        {displayRoute.poolIds.map((poolId, index) => {
           const pool = pools[poolId];
           if (!pool) return null;
           const isActive = activePoolIndex === index;
-          const isCompleted = todayRoute.completedPools?.includes(poolId) ?? false;
+          const isCompleted = displayRoute.completedPools?.includes(poolId) ?? false;
 
           return (
             <PoolStopCard

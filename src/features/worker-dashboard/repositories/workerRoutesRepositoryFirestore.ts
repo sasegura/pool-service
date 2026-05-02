@@ -1,4 +1,13 @@
-import { addDoc, collection, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import type { PoolRecord } from '../../../types/pool';
 import type { RouteDocument as Route } from '../../routes/types';
@@ -11,6 +20,9 @@ export function createWorkerRoutesRepositoryFirestore(companyId: string): Worker
     },
     subscribeAllPools(onNext, onError) {
       return subscribeAllPools(companyId, onNext, onError);
+    },
+    subscribeLogsForDate(dateYmd, onNext, onError) {
+      return subscribeLogsForDate(companyId, dateYmd, onNext, onError);
     },
     async updateMemberLocation(authUid, location, updatedAtIso) {
       await updateDoc(doc(db, 'companies', companyId, 'members', authUid), {
@@ -53,6 +65,21 @@ export function subscribeAllPools(
   return onSnapshot(
     collection(db, 'companies', companyId, 'pools'),
     (snapshot) => onNext(snapshot.docs.map((d) => poolDocToRecord(d.id, d.data()))),
+    onError
+  );
+}
+
+export function subscribeLogsForDate(
+  companyId: string,
+  dateYmd: string,
+  onNext: (logs: Record<string, unknown>[]) => void,
+  onError?: (e: unknown) => void
+) {
+  const logsRef = collection(db, 'companies', companyId, 'logs');
+  const q = query(logsRef, where('date', '==', dateYmd));
+  return onSnapshot(
+    q,
+    (snapshot) => onNext(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))),
     onError
   );
 }

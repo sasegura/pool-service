@@ -2,19 +2,23 @@ export type UnsubscribeFn = () => void;
 
 export interface AdminOverviewRoute {
   id: string;
-  workerId: string;
+  workerId?: string;
   poolIds: string[];
   completedPools?: string[];
   status: 'pending' | 'in-progress' | 'completed';
   lastPoolId?: string;
   lastStatus?: 'ok' | 'issue';
-  date: string;
+  /** Concrete service day (yyyy-MM-dd); empty for recurrence templates */
+  date?: string;
   startDate?: string;
   endDate?: string;
   recurrence?: string;
+  daysOfWeek?: number[];
+  planningPriority?: number;
   assignedDay?: number;
   startTime?: string;
   endTime?: string;
+  templateId?: string;
 }
 
 export interface AdminOverviewWorkerUser {
@@ -39,9 +43,9 @@ export interface AdminOverviewRepository {
     onNext: (routes: AdminOverviewRoute[]) => void,
     onError?: (e: unknown) => void
   ): UnsubscribeFn;
-  subscribeIncidentsCountByDate(
+  subscribeLogsForDate(
     selectedDate: string,
-    onNext: (count: number) => void,
+    onNext: (logs: Array<Record<string, unknown> & { id: string }>) => void,
     onError?: (e: unknown) => void
   ): UnsubscribeFn;
 }

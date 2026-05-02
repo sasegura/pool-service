@@ -8,6 +8,11 @@ export type WorkerLogWriteInput = { [key: string]: unknown };
 export interface WorkerRoutesRepository {
   subscribeAllRoutes(onNext: (routes: Route[]) => void, onError?: (e: unknown) => void): UnsubscribeFn;
   subscribeAllPools(onNext: (pools: PoolRecord[]) => void, onError?: (e: unknown) => void): UnsubscribeFn;
+  subscribeLogsForDate(
+    dateYmd: string,
+    onNext: (logs: Record<string, unknown>[]) => void,
+    onError?: (e: unknown) => void
+  ): UnsubscribeFn;
   updateMemberLocation(
     authUid: string,
     location: { lat: number; lng: number },

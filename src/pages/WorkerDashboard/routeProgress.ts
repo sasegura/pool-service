@@ -8,13 +8,20 @@ export const statusRank: Record<WorkerRoute['status'], number> = {
 
 const getRouteProgressKey = (routeId: string) => `worker:route-progress:${routeId}`;
 
-export const getRouteProgressKeys = (route: Pick<WorkerRoute, 'id' | 'templateId'>) => {
+export const getRouteProgressKeys = (route: Pick<WorkerRoute, 'id' | 'templateId' | 'date'>) => {
+  const isDatedInstance =
+    Boolean(route.date?.trim()) && Boolean(route.templateId) && route.templateId !== route.id;
+  if (isDatedInstance) {
+    return [getRouteProgressKey(route.id)];
+  }
   const keys = [getRouteProgressKey(route.id)];
-  if (route.templateId) keys.push(getRouteProgressKey(route.templateId));
+  if (route.templateId && route.templateId !== route.id) {
+    keys.push(getRouteProgressKey(route.templateId));
+  }
   return keys;
 };
 
-export const loadPersistedRouteProgress = (route: Pick<WorkerRoute, 'id' | 'templateId'>): PersistedRouteProgress | null => {
+export const loadPersistedRouteProgress = (route: Pick<WorkerRoute, 'id' | 'templateId' | 'date'>): PersistedRouteProgress | null => {
   const keys = getRouteProgressKeys(route);
   for (const key of keys) {
     try {
@@ -28,7 +35,9 @@ export const loadPersistedRouteProgress = (route: Pick<WorkerRoute, 'id' | 'temp
   return null;
 };
 
-export const persistRouteProgress = (route: Pick<WorkerRoute, 'id' | 'templateId' | 'status' | 'completedPools'>) => {
+export const persistRouteProgress = (
+  route: Pick<WorkerRoute, 'id' | 'templateId' | 'date' | 'status' | 'completedPools'>
+) => {
   try {
     const payload: PersistedRouteProgress = {
       status: route.status,

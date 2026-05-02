@@ -17,6 +17,8 @@ export interface WorkerRoute {
   lastStatus?: 'ok' | 'issue';
   templateId?: string;
   planningPriority?: number;
+  /** Client-only: recurring template hydrated for today before a daily Firestore doc exists */
+  isVirtual?: boolean;
 }
 
 export type PersistedRouteProgress = {

@@ -8,12 +8,17 @@ import type {
   AdminOverviewRoute as Route,
   AdminOverviewWorkerUser as Worker,
 } from '../../../features/admin-overview/hooks/useAdminOverviewData';
+import {
+  completedPoolIdsForAdminRouteOnDate,
+  type WorkerServiceLog,
+} from '../../WorkerDashboard/completedPoolsFromLogs';
 
 type EditData = { workerId: string; date: string };
 
 type AdminRoutesStatusTableProps = {
   selectedDate: string;
   routes: Route[];
+  logsForSelectedDate: Array<Record<string, unknown> & { id: string }>;
   users: Record<string, string>;
   allWorkers: Worker[];
   pools: Record<string, string>;
@@ -28,6 +33,7 @@ type AdminRoutesStatusTableProps = {
 export function AdminRoutesStatusTable({
   selectedDate,
   routes,
+  logsForSelectedDate,
   users,
   allWorkers,
   pools,
@@ -77,7 +83,13 @@ export function AdminRoutesStatusTable({
               </tr>
             ) : (
               routes.map((route) => {
-                const progress = Math.round(((route.completedPools?.length || 0) / route.poolIds.length) * 100);
+                const doneForDay = completedPoolIdsForAdminRouteOnDate(
+                  logsForSelectedDate as WorkerServiceLog[],
+                  route,
+                  selectedDate
+                ).length;
+                const totalPools = route.poolIds.length;
+                const progress = totalPools > 0 ? Math.round((doneForDay / totalPools) * 100) : 0;
                 const isIncident = route.lastStatus === 'issue';
                 const isEditing = editingRouteId === route.id;
 

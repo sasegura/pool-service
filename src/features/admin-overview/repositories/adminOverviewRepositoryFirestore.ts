@@ -1,5 +1,6 @@
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
+import { routeMatchesCalendarDay } from '../../routes/domain/routeCalendarMatching';
 import type { AdminOverviewRepository, AdminOverviewRoute, AdminOverviewWorkerUser } from '../ports';
 
 export function createAdminOverviewRepositoryFirestore(companyId: string): AdminOverviewRepository {
@@ -43,21 +44,23 @@ export function createAdminOverviewRepositoryFirestore(companyId: string): Admin
       );
     },
     subscribeRoutesByDate(selectedDate, onNext, onError) {
-      const routesQ = query(
-        collection(db, 'companies', companyId, 'routes'),
-        where('date', '==', selectedDate)
-      );
       return onSnapshot(
-        routesQ,
-        (snap) => onNext(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AdminOverviewRoute)),
+        collection(db, 'companies', companyId, 'routes'),
+        (snap) => {
+          const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AdminOverviewRoute);
+          const matched = all
+            .filter((r) => routeMatchesCalendarDay(r, selectedDate))
+            .sort((a, b) => (a.planningPriority ?? 0) - (b.planningPriority ?? 0));
+          onNext(matched);
+        },
         onError
       );
     },
-    subscribeIncidentsCountByDate(selectedDate, onNext, onError) {
+    subscribeLogsForDate(selectedDate, onNext, onError) {
       const logsQ = query(collection(db, 'companies', companyId, 'logs'), where('date', '==', selectedDate));
       return onSnapshot(
         logsQ,
-        (snap) => onNext(snap.docs.filter((d) => d.data().status === 'issue').length),
+        (snap) => onNext(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
         onError
       );
     },

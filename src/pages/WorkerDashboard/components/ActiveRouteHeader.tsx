@@ -8,6 +8,8 @@ type Props = {
   dateLocale: Locale;
   datePattern: string;
   todayRoute: WorkerRoute;
+  /** Piscinas completadas según el día (p. ej. logs de hoy); la cabecera del turno sigue usando `todayRoute.status` */
+  progressPoolIds?: string[];
   onBack: () => void;
   backLabel: string;
   title: string;
@@ -26,6 +28,7 @@ export function ActiveRouteHeader({
   dateLocale,
   datePattern,
   todayRoute,
+  progressPoolIds,
   onBack,
   backLabel,
   title,
@@ -39,6 +42,11 @@ export function ActiveRouteHeader({
   isEndingDay,
   endingDayLabel,
 }: Props) {
+  const doneCount = (progressPoolIds ?? todayRoute.completedPools)?.length || 0;
+  const totalPools = todayRoute.poolIds.length;
+  /** Solo “Finalizada” si hoy están hechas todas las paradas de la ruta (logs + progreso del día), no solo el status remoto */
+  const allPoolsDoneToday = totalPools > 0 && doneCount >= totalPools;
+
   return (
     <header className="flex items-center justify-between">
       <div className="flex items-start gap-3">
@@ -71,21 +79,30 @@ export function ActiveRouteHeader({
           </Button>
         )}
         {!isEndingDay && todayRoute.status === 'in-progress' && (
-          <Button type="button" variant="danger" onClick={onEndDay} className="gap-2 shadow-lg shadow-red-100">
-            {endDayLabel}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {allPoolsDoneToday ? (
+              <div className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" aria-hidden /> {finishedLabel}
+              </div>
+            ) : null}
+            <Button type="button" variant="danger" onClick={onEndDay} className="gap-2 shadow-lg shadow-red-100">
+              {endDayLabel}
+            </Button>
+          </div>
         )}
         {!isEndingDay && todayRoute.status === 'completed' && (
           <div className="flex flex-col items-end gap-2">
-            <div className="flex gap-2">
-              {(todayRoute.completedPools?.length || 0) < todayRoute.poolIds.length && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {doneCount < totalPools ? (
                 <Button type="button" variant="primary" onClick={onContinueDayUiOnly} size="sm" className="gap-2">
                   <Play className="w-3 h-3" /> {continueDayLabel}
                 </Button>
-              )}
-              <div className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" /> {finishedLabel}
-              </div>
+              ) : null}
+              {allPoolsDoneToday ? (
+                <div className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" aria-hidden /> {finishedLabel}
+                </div>
+              ) : null}
             </div>
             {todayRoute.startTime && todayRoute.endTime && (
               <span className="text-[10px] text-slate-400 mt-1 font-mono">

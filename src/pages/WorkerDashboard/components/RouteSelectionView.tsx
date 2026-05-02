@@ -8,6 +8,8 @@ type Props = {
   t: TFunction;
   availableRoutes: WorkerRoute[];
   assignedTodayRoutes: WorkerRoute[];
+  /** Paradas completadas en la fecha de hoy (logs + progreso del día) */
+  todayDoneCountForRoute: (route: WorkerRoute) => number;
   hasOtherRoutes: boolean;
   showAllRoutes: boolean;
   onToggleShowAllRoutes: () => void;
@@ -23,6 +25,7 @@ export function RouteSelectionView({
   t,
   availableRoutes,
   assignedTodayRoutes,
+  todayDoneCountForRoute,
   hasOtherRoutes,
   showAllRoutes,
   onToggleShowAllRoutes,
@@ -55,7 +58,7 @@ export function RouteSelectionView({
                     <p className="text-sm text-slate-500">{t('worker.poolsInRoute', { count: route.poolIds.length })}</p>
                     <p className="text-xs font-bold text-blue-700">
                       {t('worker.routeProgress', {
-                        done: route.completedPools?.length || 0,
+                        done: todayDoneCountForRoute(route),
                         total: route.poolIds.length,
                       })}
                     </p>
@@ -78,27 +81,34 @@ export function RouteSelectionView({
           </h2>
           {assignedTodayRoutes.length > 0 ? (
             <div className="space-y-2 w-full max-w-md text-left">
-              {assignedTodayRoutes.map((r) => (
-                <div key={r.id} className="p-3 bg-white border rounded-lg text-sm flex justify-between items-center shadow-sm">
-                  <div>
-                    <div className="font-bold text-slate-900">{r.routeName || t('worker.routeFallback')}</div>
-                    <div className="text-xs text-slate-500">
-                      {r.date || r.startDate || t('worker.noDate')} •{' '}
-                      {t('worker.routeProgress', {
-                        done: r.completedPools?.length || 0,
-                        total: r.poolIds.length,
-                      })}
+              {assignedTodayRoutes.map((r) => {
+                const doneToday = todayDoneCountForRoute(r);
+                const totalPools = r.poolIds.length;
+                const allDoneToday = totalPools > 0 && doneToday >= totalPools;
+                const ctaLabel =
+                  doneToday === 0
+                    ? t('worker.startRoute')
+                    : allDoneToday && r.status === 'completed'
+                      ? t('worker.retakeRoute')
+                      : t('worker.continueDay');
+                return (
+                  <div key={r.id} className="p-3 bg-white border rounded-lg text-sm flex justify-between items-center shadow-sm">
+                    <div>
+                      <div className="font-bold text-slate-900">{r.routeName || t('worker.routeFallback')}</div>
+                      <div className="text-xs text-slate-500">
+                        {r.date || r.startDate || t('worker.noDate')} •{' '}
+                        {t('worker.routeProgress', {
+                          done: doneToday,
+                          total: totalPools,
+                        })}
+                      </div>
                     </div>
+                    <Button size="sm" onClick={() => onSelectAssignedRoute(r)} className="h-8 px-3 text-xs">
+                      {ctaLabel}
+                    </Button>
                   </div>
-                  <Button size="sm" onClick={() => onSelectAssignedRoute(r)} className="h-8 px-3 text-xs">
-                    {(r.completedPools?.length || 0) === 0
-                      ? t('worker.startRoute')
-                      : r.status === 'completed'
-                        ? t('worker.retakeRoute')
-                        : t('worker.continueDay')}
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : hasOtherRoutes ? (
             <div className="space-y-4 w-full max-w-md">

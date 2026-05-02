@@ -31,6 +31,7 @@ export default function AdminOverview() {
     allWorkers,
     pools,
     liveWorkers,
+    logsForSelectedDate,
   } = useAdminOverviewData(selectedDate, !loading && !!user, companyId ?? undefined);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ workerId: '', date: '' });
@@ -40,7 +41,10 @@ export default function AdminOverview() {
 
   const handleStartEdit = (route: Route) => {
     setEditingRouteId(route.id);
-    setEditData({ workerId: route.workerId, date: route.date });
+    setEditData({
+      workerId: route.workerId ?? '',
+      date: route.date ?? selectedDate,
+    });
   };
 
   const handleSaveEdit = async (routeId: string) => {
@@ -73,6 +77,7 @@ export default function AdminOverview() {
           <AdminRoutesStatusTable
             selectedDate={selectedDate}
             routes={routes}
+            logsForSelectedDate={logsForSelectedDate}
             users={users}
             allWorkers={allWorkers}
             pools={pools}

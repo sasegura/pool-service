@@ -247,7 +247,6 @@ export default function RoutesPage() {
         poolIds: newRoute.poolIds,
         routeName,
         workerId: newRoute.noWorker ? '' : newRoute.workerId,
-        status: 'pending',
       };
 
       if (newRoute.isScheduled) {
@@ -266,11 +265,44 @@ export default function RoutesPage() {
         routeToSave.assignedDay = null;
       }
 
+      const poolIdsEqual = (a: string[], b: string[]) =>
+        a.length === b.length && a.every((id, i) => id === b[i]);
+
       if (editingRouteId) {
+        const prev = routes.find((r) => r.id === editingRouteId);
+        let shouldResetProgress = false;
+        if (prev) {
+          const prevWasOneOff = Boolean(prev.date) && !prev.startDate;
+          const nextIsOneOff = !newRoute.isScheduled;
+          const modeChanged = prevWasOneOff !== nextIsOneOff;
+          const poolsChanged = !poolIdsEqual(prev.poolIds, newRoute.poolIds);
+          if (modeChanged || poolsChanged) {
+            shouldResetProgress = true;
+          } else if (nextIsOneOff) {
+            shouldResetProgress = (prev.date || '') !== (newRoute.date || '');
+          } else {
+            const endPrev = prev.endDate || '';
+            const endNew = newRoute.hasEndDate ? newRoute.endDate || '' : '';
+            shouldResetProgress =
+              (prev.startDate || '') !== (newRoute.startDate || '') ||
+              (prev.recurrence || 'none') !== (newRoute.recurrence || 'none') ||
+              JSON.stringify(prev.daysOfWeek || []) !== JSON.stringify(newRoute.daysOfWeek || '') ||
+              endPrev !== endNew;
+          }
+        }
+        if (shouldResetProgress) {
+          routeToSave.status = 'pending';
+          routeToSave.completedPools = [];
+          routeToSave.lastPoolId = null;
+          routeToSave.lastStatus = null;
+          routeToSave.startTime = null;
+          routeToSave.endTime = null;
+        }
         if (!routesCommands) return;
         await routesCommands.updateRoute(editingRouteId, routeToSave);
         toast.success(t('routesPage.toastUpdated'));
       } else {
+        routeToSave.status = 'pending';
         routeToSave.createdAt = new Date().toISOString();
         routeToSave.order = datedRoutes.length;
         if (!routesCommands) return;
@@ -588,6 +620,7 @@ export default function RoutesPage() {
             workerId,
             date: dateStr,
             status: 'pending',
+            completedPools: [],
             templateId: srcId,
             planningPriority: p,
             createdAt: new Date().toISOString(),

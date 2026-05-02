@@ -510,6 +510,7 @@ const resources = {
         toastServiceOk: 'Service completed successfully',
         toastIncident: 'Incident reported',
         toastSaveError: 'Could not save record',
+        toastStartDayFirst: 'Start your shift first to save this visit.',
         waterMeasurement: 'Water measurement',
       },
       routesPage: {
@@ -1131,6 +1132,7 @@ const resources = {
         toastServiceOk: 'Servicio finalizado correctamente',
         toastIncident: 'Incidencia reportada',
         toastSaveError: 'Error al guardar el registro',
+        toastStartDayFirst: 'Inicia la jornada primero para guardar esta visita.',
         waterMeasurement: 'Medición de agua',
       },
       routesPage: {

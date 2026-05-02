@@ -16,6 +16,7 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean, com
   const [allWorkers, setAllWorkers] = useState<AdminOverviewWorkerUser[]>([]);
   const [pools, setPools] = useState<Record<string, string>>({});
   const [liveWorkers, setLiveWorkers] = useState<AdminOverviewWorkerUser[]>([]);
+  const [logsForSelectedDate, setLogsForSelectedDate] = useState<Array<Record<string, unknown> & { id: string }>>([]);
 
   useEffect(() => {
     if (!enabled || !adminOverviewRepository) return;
@@ -34,6 +35,7 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean, com
         setRoutes(routeDocs);
         setCompletedCount(routeDocs.filter((d) => d.status === 'completed').length);
       },
+      onLogs: setLogsForSelectedDate,
       onIncidentsCount: setIncidentsCount,
       onError: () => undefined,
     });
@@ -49,5 +51,6 @@ export function useAdminOverviewData(selectedDate: string, enabled: boolean, com
     allWorkers,
     pools,
     liveWorkers,
+    logsForSelectedDate,
   };
 }
