@@ -22,3 +22,23 @@ export function googleSignInErrorMessage(code: string | undefined, t: TFunction)
       return code ? t('login.googleErrorGeneric', { code }) : t('login.toastError');
   }
 }
+
+/** Firebase Auth error `code` from `sendPasswordResetEmail`. */
+export function passwordResetErrorMessage(code: string | undefined, t: TFunction): string {
+  switch (code) {
+    case 'auth/invalid-email':
+      return t('login.resetInvalidEmail');
+    case 'auth/missing-email':
+      return t('login.resetEmailRequired');
+    case 'auth/too-many-requests':
+      return t('login.resetTooManyRequests');
+    case 'auth/network-request-failed':
+      return t('login.googleErrorNetwork');
+    case 'auth/internal-error':
+      return t('login.googleErrorInternal');
+    case 'auth/operation-not-allowed':
+      return t('login.googleErrorOperationNotAllowed');
+    default:
+      return t('login.resetErrorGeneric', { code: code ? ` (${code})` : '' });
+  }
+}

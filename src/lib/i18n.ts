@@ -126,6 +126,17 @@ const resources = {
         googleErrorAccountExists: 'This email is already registered with another method. Sign in with email/password or link accounts in Firebase.',
         googleErrorInternal: 'Google sign-in failed (internal). Often fixed by: enabling Google provider, correct Authorized domains, or using sign-in without an embedded iframe.',
         googleErrorGeneric: 'Google sign-in failed ({{code}}).',
+        forgotPassword: 'Forgot your password?',
+        resetPasswordTitle: 'Reset password',
+        resetPasswordSubtitle: 'Enter your email and we will send you a link to set a new password.',
+        sendResetLink: 'Send reset link',
+        backToSignIn: 'Back to sign in',
+        resetEmailRequired: 'Enter your email address.',
+        resetEmailSent:
+          'If an account exists for that email, you will receive password reset instructions shortly. Check your inbox and spam folder.',
+        resetInvalidEmail: 'Enter a valid email address.',
+        resetTooManyRequests: 'Too many attempts. Wait a few minutes and try again.',
+        resetErrorGeneric: 'Could not send reset email{{code}}.',
       },
       register: {
         title: 'Create account',
@@ -381,6 +392,12 @@ const resources = {
         toastDeleted: 'User removed',
         titleEdit: 'Edit user',
         titleNew: 'New user',
+        supervisor: 'Supervisor',
+        deactivateAccess: 'Deactivate access',
+        confirmDeactivate:
+          'Deactivate this member? They will lose access to this workspace. You can invite them again later if needed.',
+        toastDeactivated: 'Member deactivated',
+        toastDeactivateError: 'Could not deactivate member',
       },
       incidents: {
         title: 'Reported incidents',
@@ -745,6 +762,18 @@ const resources = {
         googleErrorInternal:
           'Fallo interno de Google. Suele resolverse activando el proveedor Google, dominios autorizados correctos o evitando la app dentro de un iframe embebido.',
         googleErrorGeneric: 'Error al iniciar sesión con Google ({{code}}).',
+        forgotPassword: '¿Olvidaste tu contraseña?',
+        resetPasswordTitle: 'Recuperar contraseña',
+        resetPasswordSubtitle:
+          'Introduce tu correo y te enviaremos un enlace para elegir una contraseña nueva.',
+        sendResetLink: 'Enviar enlace de recuperación',
+        backToSignIn: 'Volver al inicio de sesión',
+        resetEmailRequired: 'Introduce tu correo electrónico.',
+        resetEmailSent:
+          'Si existe una cuenta con ese correo, recibirás en breve las instrucciones para restablecer la contraseña. Revisa la bandeja de entrada y el spam.',
+        resetInvalidEmail: 'Introduce un correo válido.',
+        resetTooManyRequests: 'Demasiados intentos. Espera unos minutos y prueba de nuevo.',
+        resetErrorGeneric: 'No se pudo enviar el correo de recuperación{{code}}.',
       },
       register: {
         title: 'Crear cuenta',
@@ -1003,6 +1032,12 @@ const resources = {
         toastDeleted: 'Usuario eliminado',
         titleEdit: 'Editar usuario',
         titleNew: 'Nuevo usuario',
+        supervisor: 'Supervisor',
+        deactivateAccess: 'Desactivar acceso',
+        confirmDeactivate:
+          '¿Desactivar a este miembro? Perderá el acceso a este espacio de trabajo. Podrás invitarlo de nuevo más adelante si lo necesitas.',
+        toastDeactivated: 'Miembro desactivado',
+        toastDeactivateError: 'No se pudo desactivar al miembro',
       },
       incidents: {
         title: 'Incidencias reportadas',

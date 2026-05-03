@@ -142,8 +142,14 @@ service cloud.firestore {
             && request.resource.data.role == resource.data.role
             && request.resource.data.status == resource.data.status
           )
-          || (isAdminOrSupervisor(companyId)
+          || (isCompanyAdmin(companyId)
             && request.resource.data.uid == resource.data.uid
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.status == resource.data.status)
+          || (hasActiveMembership(companyId)
+            && memberRole(companyId) == 'supervisor'
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.role == resource.data.role
             && request.resource.data.status == resource.data.status)
           || (
             resource.data.status == 'invited'
@@ -156,7 +162,8 @@ service cloud.firestore {
             && request.resource.data.email == resource.data.email
           );
 
-        allow delete: if isAdminOrSupervisor(companyId);
+        // Role / status changes for other members go through Cloud Functions (supervisor cannot elevate privileges client-side).
+        allow delete: if isCompanyAdmin(companyId);
       }
 
       match /invites/{inviteId} {

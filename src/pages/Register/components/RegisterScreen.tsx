@@ -107,6 +107,12 @@ export function RegisterScreen({
           >
             {t('register.backToLogin')}
           </Link>
+          <Link
+            to="/login?mode=reset"
+            className="block w-full text-center text-xs font-bold text-blue-600 hover:text-blue-800 underline-offset-2 hover:underline"
+          >
+            {t('login.forgotPassword')}
+          </Link>
         </form>
       </Card>
     </div>

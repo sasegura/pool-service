@@ -1,22 +1,42 @@
 import React, { useEffect, useState } from 'react';
-import { getRedirectResult, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect } from 'firebase/auth';
+import {
+  getRedirectResult,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+} from 'firebase/auth';
 import { auth, googleProvider } from '../../lib/firebase';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { DEMO_ACCOUNT_EMAIL } from '../../config/demoAccount';
-import { googleSignInErrorMessage } from '../../shared/lib/firebaseGoogleAuthErrors';
+import { googleSignInErrorMessage, passwordResetErrorMessage } from '../../shared/lib/firebaseGoogleAuthErrors';
 import { isEmbedded } from './components/isEmbedded';
 import { LoginScreen } from './components/LoginScreen';
 
 export default function Login() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const forgotPasswordMode = searchParams.get('mode') === 'reset';
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { authUser, loading: authLoading } = useAuth();
+
+  const setForgotPasswordModeInUrl = (on: boolean) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (on) next.set('mode', 'reset');
+        else next.delete('mode');
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   if (!authLoading && authUser) {
     return <Navigate to="/" replace />;
@@ -63,6 +83,33 @@ export default function Login() {
     }
   };
 
+  const handleSendPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed) {
+      toast.error(t('login.resetEmailRequired'));
+      return;
+    }
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmed);
+      toast.success(t('login.resetEmailSent'));
+      setForgotPasswordModeInUrl(false);
+    } catch (error: unknown) {
+      console.error(error);
+      const code =
+        error && typeof error === 'object' && 'code' in error ? String((error as { code: string }).code) : '';
+      if (code === 'auth/user-not-found') {
+        toast.success(t('login.resetEmailSent'));
+        setForgotPasswordModeInUrl(false);
+        return;
+      }
+      toast.error(passwordResetErrorMessage(code, t));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
@@ -96,9 +143,13 @@ export default function Login() {
       email={email}
       password={password}
       loading={loading}
+      forgotPasswordMode={forgotPasswordMode}
       onEmailChange={setEmail}
       onPasswordChange={setPassword}
       onSubmit={handleEmailLogin}
+      onForgotPassword={() => setForgotPasswordModeInUrl(true)}
+      onBackFromReset={() => setForgotPasswordModeInUrl(false)}
+      onResetSubmit={handleSendPasswordReset}
       onGoogleLogin={handleGoogleLogin}
       onFillDemoEmail={fillDemoEmail}
     />
